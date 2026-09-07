@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="Dottor.BlazorAI.AppHost/Dottor.BlazorAI.AppHost.csproj" />
+  <Project Path="Dottor.BlazorAI.ServiceDefaults/Dottor.BlazorAI.ServiceDefaults.csproj" />
+  <Project Path="Dottor.BlazorAI.Web/Dottor.BlazorAI.Web.csproj" />
+</Solution>
