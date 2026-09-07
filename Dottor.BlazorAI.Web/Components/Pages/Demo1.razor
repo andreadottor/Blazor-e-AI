@@ -1,0 +1,61 @@
+@page "/demo1"
+@inject Dottor.BlazorAI.Web.Services.ChatService Chat
+
+<PageTitle>Demo 1 - Risposta completa</PageTitle>
+
+<h1>Demo 1 — Aspetto il risultato</h1>
+<p class="lead">Una <code>Task&lt;T&gt;</code>: la risposta compare solo quando il modello ha finito.</p>
+
+<div class="demo-panel">
+    <label for="prompt" class="form-label">Prompt</label>
+    <textarea id="prompt" class="form-control" rows="4" @bind="prompt" disabled="@isLoading"></textarea>
+    <button class="btn btn-primary mt-3" @onclick="AskAsync" disabled="@(isLoading || string.IsNullOrWhiteSpace(prompt))">
+        Invia
+    </button>
+</div>
+
+@if (isLoading)
+{
+    <div class="d-flex align-items-center gap-2 mt-4" role="status">
+        <div class="spinner-border text-primary"></div>
+        <span>Attendo la risposta completa...</span>
+    </div>
+}
+else if (!string.IsNullOrWhiteSpace(error))
+{
+    <div class="alert alert-danger mt-4">@error</div>
+}
+else if (!string.IsNullOrWhiteSpace(answer))
+{
+    <section class="result-section mt-4">
+        <h2>Risposta</h2>
+        <p class="preserve-lines">@answer</p>
+    </section>
+}
+
+@code {
+    private string prompt = "Spiegami in modo semplice perché IAsyncEnumerable è utile in una UI Blazor.";
+    private string? answer;
+    private string? error;
+    private bool isLoading;
+
+    private async Task AskAsync()
+    {
+        isLoading = true;
+        answer = null;
+        error = null;
+
+        try
+        {
+            answer = await Chat.AskAsync(prompt, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+}

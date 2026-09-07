@@ -1,7 +1,45 @@
 ﻿@page "/"
 
-<PageTitle>Home</PageTitle>
+<PageTitle>Blazor e AI</PageTitle>
 
-<h1>Hello, world!</h1>
+<h1>Blazor e AI: UI reattive tra streaming e agenti</h1>
+<p class="lead mb-4">Quattro soluzioni corrette per quattro requisiti differenti.</p>
 
-Welcome to your new app.
+<div class="row g-4 demo-grid">
+    <div class="col-md-6">
+        <a class="card h-100 text-decoration-none" href="demo1">
+            <div class="card-body">
+                <span class="demo-number">1</span>
+                <h2>Aspetto il risultato</h2>
+                <p><code>Task&lt;T&gt;</code> e spinner fino alla risposta completa.</p>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-6">
+        <a class="card h-100 text-decoration-none" href="demo2">
+            <div class="card-body">
+                <span class="demo-number">2</span>
+                <h2>Streaming con IAsyncEnumerable</h2>
+                <p>Il testo arriva mentre il modello lo produce.</p>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-6">
+        <a class="card h-100 text-decoration-none" href="demo3">
+            <div class="card-body">
+                <span class="demo-number">3</span>
+                <h2>Pipeline AI</h2>
+                <p>Eventi progressivi da una pipeline Microsoft Agent Framework.</p>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-6">
+        <a class="card h-100 text-decoration-none" href="demo4">
+            <div class="card-body">
+                <span class="demo-number">4</span>
+                <h2>Background processing con Channel&lt;T&gt;</h2>
+                <p>Queue e worker disaccoppiano il lifetime dalla UI.</p>
+            </div>
+        </a>
+    </div>
+</div>

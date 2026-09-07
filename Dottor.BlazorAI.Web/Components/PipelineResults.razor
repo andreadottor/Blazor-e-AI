@@ -1,0 +1,103 @@
+@using Dottor.BlazorAI.Web.Pipeline
+
+@if (DocumentId is not null)
+{
+    <div class="card mb-4">
+        <div class="card-body">
+            <div><strong>Documento:</strong> @FileName</div>
+            @if (JobId is not null)
+            {
+                <div class="text-secondary small"><strong>Job ID:</strong> @JobId</div>
+                <div class="text-secondary small"><strong>Stato:</strong> @JobStatus</div>
+            }
+            <a class="btn btn-sm btn-outline-secondary mt-2" href="@($"/documents/{DocumentId}/pdf")" target="_blank">
+                Apri PDF originale
+            </a>
+        </div>
+    </div>
+}
+
+@if (Updates.Count > 0)
+{
+    <ol class="pipeline-steps list-unstyled mb-4">
+        @foreach (var update in Updates)
+        {
+            <li class="mb-2 @CssClass(update.Status)">
+                <span class="step-icon">@Icon(update.Status)</span>
+                <strong>@StepName(update.Step)</strong>
+                @if (!string.IsNullOrWhiteSpace(update.Message) && update.Status == PipelineUpdateStatus.Failed)
+                {
+                    <span> — @update.Message</span>
+                }
+            </li>
+        }
+    </ol>
+}
+
+@if (!string.IsNullOrWhiteSpace(Summary))
+{
+    <section class="result-section">
+        <h2>Riassunto</h2>
+        <p class="preserve-lines">@Summary</p>
+    </section>
+}
+
+@if (!string.IsNullOrWhiteSpace(Category))
+{
+    <section class="result-section">
+        <h2>Categoria</h2>
+        <p>@Category</p>
+    </section>
+}
+
+@if (ImageAvailable && DocumentId is not null)
+{
+    <section class="result-section">
+        <h2>Immagine</h2>
+        <img class="generated-image" src="@($"/documents/{DocumentId}/image?v={ImageVersion}")" alt="Immagine generata dal documento" />
+    </section>
+}
+
+@code {
+    [Parameter] public Guid? DocumentId { get; set; }
+    [Parameter] public Guid? JobId { get; set; }
+    [Parameter] public string? FileName { get; set; }
+    [Parameter] public IReadOnlyList<PipelineUpdate> Updates { get; set; } = [];
+    [Parameter] public string? Summary { get; set; }
+    [Parameter] public string? Category { get; set; }
+    [Parameter] public bool ImageAvailable { get; set; }
+
+    private long ImageVersion => Updates.Count;
+
+    private string JobStatus => Updates.LastOrDefault()?.Status switch
+    {
+        PipelineUpdateStatus.Failed => "Non riuscito",
+        _ when Updates.Any(x => x.Step == "Complete" && x.Status == PipelineUpdateStatus.Completed) => "Completato",
+        _ => "In elaborazione"
+    };
+
+    private static string Icon(PipelineUpdateStatus status) => status switch
+    {
+        PipelineUpdateStatus.Completed => "✓",
+        PipelineUpdateStatus.Failed => "✕",
+        _ => "●"
+    };
+
+    private static string CssClass(PipelineUpdateStatus status) => status switch
+    {
+        PipelineUpdateStatus.Completed => "text-success",
+        PipelineUpdateStatus.Failed => "text-danger",
+        _ => "text-primary"
+    };
+
+    private static string StepName(string step) => step switch
+    {
+        "Upload" => "PDF salvato",
+        "ExtractText" => "Testo estratto",
+        "Summary" => "Riassunto",
+        "Category" => "Categorizzazione",
+        "Image" => "Generazione immagine",
+        "Complete" => "Pipeline completata",
+        _ => step
+    };
+}

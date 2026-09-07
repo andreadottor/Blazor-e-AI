@@ -1,0 +1,118 @@
+@page "/demo4"
+@implements IAsyncDisposable
+@using Dottor.BlazorAI.Web.Background
+@using Dottor.BlazorAI.Web.Pipeline
+@using Dottor.BlazorAI.Web.Services
+@inject DocumentService Documents
+@inject DocumentJobService Jobs
+
+<PageTitle>Demo 4 - Background processing</PageTitle>
+
+<h1>Demo 4 — Background processing con Channel&lt;T&gt;</h1>
+<p class="lead">La UI avvia un job. Queue e worker tengono separati producer e consumer nello stesso processo.</p>
+
+<div class="alert alert-secondary small">
+    Il channel è in memory: non è un broker e il lavoro non è durable se il processo termina.
+</div>
+
+<div class="demo-panel">
+    <label class="form-label" for="pdf4">Scegli un PDF (massimo 10 MB)</label>
+    <InputFile id="pdf4" class="form-control" OnChange="StartAsync" accept="application/pdf,.pdf" disabled="@isWatching" />
+</div>
+
+@if (!string.IsNullOrWhiteSpace(error))
+{
+    <div class="alert alert-danger mt-4">@error</div>
+}
+
+<div class="mt-4">
+    <PipelineResults DocumentId="documentId"
+                     JobId="jobId"
+                     FileName="@fileName"
+                     Updates="updates"
+                     Summary="@summary"
+                     Category="@category"
+                     ImageAvailable="imageAvailable" />
+</div>
+
+@code {
+    private readonly List<PipelineUpdate> updates = [];
+    private CancellationTokenSource? watchCancellation;
+    private Guid? documentId;
+    private Guid? jobId;
+    private string? fileName;
+    private string? summary;
+    private string? category;
+    private string? error;
+    private bool imageAvailable;
+    private bool isWatching;
+
+    private async Task StartAsync(InputFileChangeEventArgs args)
+    {
+        Reset();
+        watchCancellation = new CancellationTokenSource();
+        isWatching = true;
+        fileName = args.File.Name;
+
+        try
+        {
+            await using var stream = args.File.OpenReadStream(DocumentService.MaxPdfSize, watchCancellation.Token);
+            documentId = await Documents.SaveUploadAsync(
+                args.File.Name, args.File.ContentType, stream, watchCancellation.Token);
+
+            jobId = await Jobs.StartAsync(documentId.Value, watchCancellation.Token);
+
+            await foreach (var update in Jobs.WatchAsync(jobId.Value, watchCancellation.Token))
+            {
+                await InvokeAsync(() => Apply(update));
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Si interrompe soltanto l'osservazione: il BackgroundService continua il job.
+        }
+        catch (Exception ex)
+        {
+            await InvokeAsync(() => error = ex.Message);
+            if (documentId is not null && jobId is null)
+            {
+                await Documents.MarkFailedAsync(documentId.Value, ex.Message);
+            }
+        }
+        finally
+        {
+            await InvokeAsync(() => isWatching = false);
+        }
+    }
+
+    private void Apply(PipelineUpdate update)
+    {
+        var index = updates.FindIndex(x => x.Step == update.Step);
+        if (index < 0) updates.Add(update); else updates[index] = update;
+        summary = update.Summary ?? summary;
+        category = update.Category ?? category;
+        imageAvailable |= update.ImageAvailable;
+        if (update.Status == PipelineUpdateStatus.Failed) error = update.Message;
+        StateHasChanged();
+    }
+
+    private void Reset()
+    {
+        watchCancellation?.Cancel();
+        watchCancellation?.Dispose();
+        updates.Clear();
+        documentId = null;
+        jobId = null;
+        summary = null;
+        category = null;
+        error = null;
+        imageAvailable = false;
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        watchCancellation?.Cancel();
+        watchCancellation?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}

@@ -1,0 +1,77 @@
+@page "/demo2"
+@implements IAsyncDisposable
+@inject Dottor.BlazorAI.Web.Services.ChatService Chat
+
+<PageTitle>Demo 2 - Streaming</PageTitle>
+
+<h1>Demo 2 — Streaming con IAsyncEnumerable</h1>
+<p class="lead">La stessa richiesta, ma il producer restituisce testo mentre lo produce.</p>
+
+<div class="demo-panel">
+    <label for="prompt" class="form-label">Prompt</label>
+    <textarea id="prompt" class="form-control" rows="4" @bind="prompt" disabled="@isStreaming"></textarea>
+    <div class="d-flex gap-2 mt-3">
+        <button class="btn btn-primary" @onclick="AskAsync" disabled="@(isStreaming || string.IsNullOrWhiteSpace(prompt))">Invia</button>
+        <button class="btn btn-outline-danger" @onclick="Stop" disabled="@(!isStreaming)">Stop</button>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(error))
+{
+    <div class="alert alert-danger mt-4">@error</div>
+}
+
+@if (!string.IsNullOrEmpty(answer) || isStreaming)
+{
+    <section class="result-section mt-4">
+        <h2>Risposta in streaming</h2>
+        <p class="preserve-lines">@answer@if (isStreaming) {<span class="stream-cursor">▌</span>}</p>
+    </section>
+}
+
+@code {
+    private string prompt = "Spiegami in modo semplice perché IAsyncEnumerable è utile in una UI Blazor.";
+    private string answer = string.Empty;
+    private string? error;
+    private bool isStreaming;
+    private CancellationTokenSource? cancellation;
+
+    private async Task AskAsync()
+    {
+        cancellation?.Dispose();
+        cancellation = new CancellationTokenSource();
+        answer = string.Empty;
+        error = null;
+        isStreaming = true;
+
+        try
+        {
+            await foreach (var text in Chat.AskStreamingAsync(prompt, cancellation.Token))
+            {
+                answer += text;
+                StateHasChanged();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            error = "Generazione interrotta.";
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            isStreaming = false;
+        }
+    }
+
+    private void Stop() => cancellation?.Cancel();
+
+    public ValueTask DisposeAsync()
+    {
+        cancellation?.Cancel();
+        cancellation?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}
