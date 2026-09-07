@@ -25,16 +25,13 @@ builder.Services.AddPooledDbContextFactory<AppDbContext>(options =>
 
 var configuredApiKey = builder.Configuration["AI:OpenAI:ApiKey"];
 var apiKey = string.IsNullOrWhiteSpace(configuredApiKey) ? "not-configured" : configuredApiKey;
-var model = builder.Configuration["AI:OpenAI:Model"] ?? "gpt-5.4";
-var configuredImageModel = builder.Configuration["AI:OpenAI:ImageModel"];
-var imageModel = string.IsNullOrWhiteSpace(configuredImageModel) ? model : configuredImageModel;
+var model = builder.Configuration["AI:OpenAI:Model"] ?? "gpt-5.5";
 var endpoint = builder.Configuration["AI:OpenAI:Endpoint"] ?? "https://example.invalid/openai/v1";
 var openAI = new OpenAIClient(
     new ApiKeyCredential(apiKey),
     new OpenAIClientOptions { Endpoint = new Uri(endpoint) });
 
 builder.Services.AddSingleton<IChatClient>(openAI.GetChatClient(model).AsIChatClient());
-builder.Services.AddSingleton(openAI.GetImageClient(imageModel));
 builder.Services.AddSingleton<ChatService>();
 builder.Services.AddSingleton<DocumentService>();
 builder.Services.AddSingleton<DocumentTextExtractor>();

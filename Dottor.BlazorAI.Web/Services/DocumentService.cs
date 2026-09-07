@@ -3,10 +3,29 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Dottor.BlazorAI.Web.Services;
 
+/// <summary>
+/// Persistence gateway for <see cref="Document"/> entities. It stores the uploaded PDF and updates the
+/// document as each pipeline step completes (extracted text, summary, category, generated image, status).
+/// </summary>
+/// <remarks>
+/// Data flow reference: used by <b>Demo 3</b> (<c>/demo3</c>) and <b>Demo 4</b> (<c>/demo4</c>) to save the
+/// uploaded PDF and to persist the incremental results produced by the document pipeline.
+/// </remarks>
 public sealed class DocumentService(IDbContextFactory<AppDbContext> dbFactory)
 {
+    /// <summary>Maximum accepted size of an uploaded PDF (10 MB).</summary>
     public const long MaxPdfSize = 10 * 1024 * 1024;
 
+    /// <summary>
+    /// Validates and stores an uploaded PDF as a new document in the <see cref="DocumentStatus.Uploaded"/> state.
+    /// This is the entry point of the flow triggered when the user uploads a file in Demo 3 and Demo 4.
+    /// </summary>
+    /// <param name="fileName">Original file name of the upload.</param>
+    /// <param name="contentType">Content type reported by the browser.</param>
+    /// <param name="content">Stream with the PDF bytes.</param>
+    /// <param name="cancellationToken">Token used to cancel the operation.</param>
+    /// <returns>The identifier of the newly created document.</returns>
+    /// <exception cref="InvalidDataException">Thrown when the file is empty, too large or not a valid PDF.</exception>
     public async Task<Guid> SaveUploadAsync(
         string fileName,
         string contentType,
@@ -45,12 +64,16 @@ public sealed class DocumentService(IDbContextFactory<AppDbContext> dbFactory)
         return document.Id;
     }
 
+    /// <summary>
+    /// Loads a document by its identifier (read-only). Used by the pipeline and by the UI to display results.
+    /// </summary>
     public async Task<Document?> GetAsync(Guid id, CancellationToken cancellationToken = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
         return await db.Documents.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
     }
 
+    /// <summary>Marks the document as <see cref="DocumentStatus.Processing"/> and clears any previous error.</summary>
     public Task MarkProcessingAsync(Guid id, CancellationToken cancellationToken) =>
         UpdateAsync(id, document =>
         {
@@ -58,15 +81,19 @@ public sealed class DocumentService(IDbContextFactory<AppDbContext> dbFactory)
             document.ErrorMessage = null;
         }, cancellationToken);
 
+    /// <summary>Persists the text extracted from the PDF (result of the "ExtractText" pipeline step).</summary>
     public Task SaveExtractedTextAsync(Guid id, string text, CancellationToken cancellationToken) =>
         UpdateAsync(id, document => document.ExtractedText = text, cancellationToken);
 
+    /// <summary>Persists the AI-generated summary (result of the "Summary" pipeline step).</summary>
     public Task SaveSummaryAsync(Guid id, string summary, CancellationToken cancellationToken) =>
         UpdateAsync(id, document => document.Summary = summary, cancellationToken);
 
+    /// <summary>Persists the AI-generated category (result of the "Category" pipeline step).</summary>
     public Task SaveCategoryAsync(Guid id, string category, CancellationToken cancellationToken) =>
         UpdateAsync(id, document => document.Category = category, cancellationToken);
 
+    /// <summary>Persists the AI-generated image (result of the "Image" pipeline step).</summary>
     public Task SaveImageAsync(Guid id, byte[] image, string contentType, CancellationToken cancellationToken) =>
         UpdateAsync(id, document =>
         {
@@ -74,9 +101,11 @@ public sealed class DocumentService(IDbContextFactory<AppDbContext> dbFactory)
             document.GeneratedImageContentType = contentType;
         }, cancellationToken);
 
+    /// <summary>Marks the document as <see cref="DocumentStatus.Completed"/> (final "Complete" pipeline step).</summary>
     public Task MarkCompletedAsync(Guid id, CancellationToken cancellationToken) =>
         UpdateAsync(id, document => document.Status = DocumentStatus.Completed, cancellationToken);
 
+    /// <summary>Marks the document as <see cref="DocumentStatus.Failed"/> and stores the error message.</summary>
     public Task MarkFailedAsync(Guid id, string error, CancellationToken cancellationToken = default) =>
         UpdateAsync(id, document =>
         {
@@ -84,6 +113,9 @@ public sealed class DocumentService(IDbContextFactory<AppDbContext> dbFactory)
             document.ErrorMessage = error;
         }, cancellationToken);
 
+    /// <summary>
+    /// Loads the document, applies the <paramref name="update"/> mutation, refreshes the timestamp and saves it.
+    /// </summary>
     private async Task UpdateAsync(Guid id, Action<Document> update, CancellationToken cancellationToken)
     {
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
