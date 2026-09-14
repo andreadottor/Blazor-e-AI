@@ -1,4 +1,5 @@
 @page "/demo1"
+@using Markdig
 @inject Dottor.BlazorAI.Web.Services.ChatService Chat
 
 <PageTitle>Demo 1 - Risposta completa</PageTitle>
@@ -29,7 +30,7 @@ else if (!string.IsNullOrWhiteSpace(answer))
 {
     <section class="result-section mt-4">
         <h2>Risposta</h2>
-        <p class="preserve-lines">@answer</p>
+        <div class="markdown-body">@((MarkupString)Markdown.ToHtml(answer, markdownPipeline))</div>
     </section>
 }
 
@@ -38,6 +39,10 @@ else if (!string.IsNullOrWhiteSpace(answer))
     private string? answer;
     private string? error;
     private bool isLoading;
+
+    private static readonly MarkdownPipeline markdownPipeline = new MarkdownPipelineBuilder()
+        .UseAdvancedExtensions()
+        .Build();
 
     private async Task AskAsync()
     {

@@ -1,4 +1,5 @@
 @page "/demo2"
+@using Markdig
 @implements IAsyncDisposable
 @inject Dottor.BlazorAI.Web.Services.ChatService Chat
 
@@ -25,7 +26,7 @@
 {
     <section class="result-section mt-4">
         <h2>Risposta in streaming</h2>
-        <p class="preserve-lines">@answer@if (isStreaming) {<span class="stream-cursor">▌</span>}</p>
+        <div class="markdown-body">@((MarkupString)Markdown.ToHtml(answer, markdownPipeline))@if (isStreaming) {<span class="stream-cursor">▌</span>}</div>
     </section>
 }
 
@@ -35,6 +36,10 @@
     private string? error;
     private bool isStreaming;
     private CancellationTokenSource? cancellation;
+
+    private static readonly MarkdownPipeline markdownPipeline = new MarkdownPipelineBuilder()
+        .UseAdvancedExtensions()
+        .Build();
 
     private async Task AskAsync()
     {
