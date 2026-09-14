@@ -1,5 +1,4 @@
 @page "/demo2"
-@using Markdig
 @implements IAsyncDisposable
 @inject Dottor.BlazorAI.Web.Services.ChatService Chat
 
@@ -39,6 +38,7 @@
 
     private static readonly MarkdownPipeline markdownPipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions()
+        .UseColorCode()
         .Build();
 
     private async Task AskAsync()
