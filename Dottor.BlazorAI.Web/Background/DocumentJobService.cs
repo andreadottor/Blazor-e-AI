@@ -13,7 +13,8 @@ namespace Dottor.BlazorAI.Web.Background;
 /// </remarks>
 public sealed class DocumentJobService(
     DocumentProcessingQueue queue,
-    DocumentUpdateHub updates)
+    DocumentUpdateHub updates,
+    DocumentPipelineService pipeline)
 {
     /// <summary>
     /// Creates a new job, registers its update channel and enqueues the document for background processing.
@@ -34,4 +35,12 @@ public sealed class DocumentJobService(
     /// <param name="cancellationToken">Token used to stop watching.</param>
     public IAsyncEnumerable<PipelineUpdate> WatchAsync(Guid jobId, CancellationToken cancellationToken) =>
         updates.WatchAsync(jobId, cancellationToken);
+
+    /// <summary>Forwards a human response to the same workflow run used by the background worker.</summary>
+    public Task RespondAsync(
+        Guid documentId,
+        bool approved,
+        string? prompt,
+        CancellationToken cancellationToken = default) =>
+        pipeline.RespondAsync(documentId, approved, prompt, cancellationToken);
 }

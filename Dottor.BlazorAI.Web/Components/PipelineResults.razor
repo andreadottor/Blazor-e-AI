@@ -17,6 +17,31 @@
     </div>
 }
 
+@if (ApprovalPending && !string.IsNullOrWhiteSpace(ImagePrompt))
+{
+    <section class="result-section border border-warning rounded p-3 mb-4">
+        <h2 class="h5 text-warning">⚠ In attesa di approvazione</h2>
+        <label class="form-label" for="imagePrompt"><strong>Prompt proposto</strong></label>
+        @if (isEditingPrompt)
+        {
+            <textarea id="imagePrompt" class="form-control mb-3" rows="7" @bind="editedPrompt" @bind:event="oninput" disabled="@ApprovalResponsePending"></textarea>
+            <button class="btn btn-success me-2" @onclick="ApproveEditedAsync" disabled="@ApprovalResponsePending">
+                Approva modifiche
+            </button>
+            <button class="btn btn-outline-secondary" @onclick="CancelEditing" disabled="@ApprovalResponsePending">
+                Annulla modifica
+            </button>
+        }
+        else
+        {
+            <div class="bg-body-tertiary border rounded p-3 mb-3 preserve-lines">@ImagePrompt</div>
+            <button class="btn btn-success me-2" @onclick="ApproveAsync" disabled="@ApprovalResponsePending">Approva</button>
+            <button class="btn btn-outline-primary me-2" @onclick="BeginEditing" disabled="@ApprovalResponsePending">Modifica</button>
+            <button class="btn btn-outline-danger" @onclick="RejectAsync" disabled="@ApprovalResponsePending">Rifiuta</button>
+        }
+    </section>
+}
+
 @if (Updates.Count > 0)
 {
     <ol class="pipeline-steps list-unstyled mb-4">
@@ -66,20 +91,57 @@
     [Parameter] public string? Summary { get; set; }
     [Parameter] public string? Category { get; set; }
     [Parameter] public bool ImageAvailable { get; set; }
+    [Parameter] public string? ImagePrompt { get; set; }
+    [Parameter] public bool ApprovalPending { get; set; }
+    [Parameter] public bool ApprovalResponsePending { get; set; }
+    [Parameter] public EventCallback<string> OnApprove { get; set; }
+    [Parameter] public EventCallback OnReject { get; set; }
+
+    private bool isEditingPrompt;
+    private string? editedPrompt;
+    private string? previousPrompt;
+
+    protected override void OnParametersSet()
+    {
+        if (ImagePrompt != previousPrompt)
+        {
+            previousPrompt = ImagePrompt;
+            editedPrompt = ImagePrompt;
+            isEditingPrompt = false;
+        }
+    }
+
+    private void BeginEditing()
+    {
+        editedPrompt = ImagePrompt;
+        isEditingPrompt = true;
+    }
+
+    private void CancelEditing() => isEditingPrompt = false;
+
+    private Task ApproveAsync() => OnApprove.InvokeAsync(ImagePrompt ?? string.Empty);
+
+    private Task ApproveEditedAsync() => OnApprove.InvokeAsync(editedPrompt ?? string.Empty);
+
+    private Task RejectAsync() => OnReject.InvokeAsync();
 
     private long ImageVersion => Updates.Count;
 
-    private string JobStatus => Updates.LastOrDefault()?.Status switch
-    {
-        PipelineUpdateStatus.Failed => "Non riuscito",
-        _ when Updates.Any(x => x.Step == "Complete" && x.Status == PipelineUpdateStatus.Completed) => "Completato",
-        _ => "In elaborazione"
-    };
+    private string JobStatus =>
+        Updates.Any(x => x.Status == PipelineUpdateStatus.Failed) ? "Non riuscito" :
+        Updates.Any(x => x.Status == PipelineUpdateStatus.Cancelled) ? "Annullato" :
+        Updates.Any(x => x.Status == PipelineUpdateStatus.Rejected) ? "Terminato senza immagine" :
+        Updates.Any(x => x.Status == PipelineUpdateStatus.WaitingForApproval) ? "In attesa di approvazione" :
+        Updates.Any(x => x.Step == "Complete" && x.Status == PipelineUpdateStatus.Completed) ? "Completato" :
+        "In elaborazione";
 
     private static string Icon(PipelineUpdateStatus status) => status switch
     {
         PipelineUpdateStatus.Completed => "✓",
         PipelineUpdateStatus.Failed => "✕",
+        PipelineUpdateStatus.Rejected => "✕",
+        PipelineUpdateStatus.Cancelled => "■",
+        PipelineUpdateStatus.WaitingForApproval => "⚠",
         _ => "●"
     };
 
@@ -87,6 +149,9 @@
     {
         PipelineUpdateStatus.Completed => "text-success",
         PipelineUpdateStatus.Failed => "text-danger",
+        PipelineUpdateStatus.Rejected => "text-danger",
+        PipelineUpdateStatus.Cancelled => "text-secondary",
+        PipelineUpdateStatus.WaitingForApproval => "text-warning",
         _ => "text-primary"
     };
 
@@ -96,7 +161,10 @@
         "ExtractText" => "Testo estratto",
         "Summary" => "Riassunto",
         "Category" => "Categorizzazione",
+        "ImagePrompt" => "Prompt immagine generato",
+        "Approval" => "Approvazione umana",
         "Image" => "Generazione immagine",
+        "Rejected" => "Generazione immagine rifiutata",
         "Complete" => "Pipeline completata",
         _ => step
     };

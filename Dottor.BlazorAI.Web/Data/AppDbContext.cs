@@ -16,6 +16,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         document.Property(x => x.ExtractedText).HasColumnType("nvarchar(max)");
         document.Property(x => x.Summary).HasColumnType("nvarchar(max)");
         document.Property(x => x.Category).HasMaxLength(100);
+        document.Property(x => x.GeneratedImagePrompt).HasColumnType("nvarchar(max)");
+        document.Property(x => x.ApprovedImagePrompt).HasColumnType("nvarchar(max)");
+        document.Property(x => x.ApprovalStatus).HasConversion<string>().HasMaxLength(20);
         document.Property(x => x.GeneratedImage).HasColumnType("varbinary(max)");
         document.Property(x => x.GeneratedImageContentType).HasMaxLength(100);
         document.Property(x => x.ErrorMessage).HasColumnType("nvarchar(max)");

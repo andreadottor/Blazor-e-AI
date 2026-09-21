@@ -93,6 +93,34 @@ public sealed class DocumentService(IDbContextFactory<AppDbContext> dbFactory)
     public Task SaveCategoryAsync(Guid id, string category, CancellationToken cancellationToken) =>
         UpdateAsync(id, document => document.Category = category, cancellationToken);
 
+    /// <summary>Persists the AI proposal before the workflow asks for human approval.</summary>
+    public Task SaveImagePromptAsync(Guid id, string prompt, CancellationToken cancellationToken) =>
+        UpdateAsync(id, document =>
+        {
+            document.GeneratedImagePrompt = prompt;
+            document.ApprovedImagePrompt = null;
+            document.ApprovalStatus = ApprovalStatus.Pending;
+            document.ApprovedAt = null;
+        }, cancellationToken);
+
+    /// <summary>Persists the exact prompt approved by the user.</summary>
+    public Task ApproveImagePromptAsync(Guid id, string prompt, CancellationToken cancellationToken) =>
+        UpdateAsync(id, document =>
+        {
+            document.ApprovedImagePrompt = prompt;
+            document.ApprovalStatus = ApprovalStatus.Approved;
+            document.ApprovedAt = DateTimeOffset.UtcNow;
+        }, cancellationToken);
+
+    /// <summary>Records a controlled rejection; no image will be generated.</summary>
+    public Task RejectImagePromptAsync(Guid id, CancellationToken cancellationToken) =>
+        UpdateAsync(id, document =>
+        {
+            document.ApprovedImagePrompt = null;
+            document.ApprovalStatus = ApprovalStatus.Rejected;
+            document.Status = DocumentStatus.Rejected;
+        }, cancellationToken);
+
     /// <summary>Persists the AI-generated image (result of the "Image" pipeline step).</summary>
     public Task SaveImageAsync(Guid id, byte[] image, string contentType, CancellationToken cancellationToken) =>
         UpdateAsync(id, document =>
@@ -104,6 +132,14 @@ public sealed class DocumentService(IDbContextFactory<AppDbContext> dbFactory)
     /// <summary>Marks the document as <see cref="DocumentStatus.Completed"/> (final "Complete" pipeline step).</summary>
     public Task MarkCompletedAsync(Guid id, CancellationToken cancellationToken) =>
         UpdateAsync(id, document => document.Status = DocumentStatus.Completed, cancellationToken);
+
+    /// <summary>Marks processing as cancelled without classifying it as a technical failure.</summary>
+    public Task MarkCancelledAsync(Guid id, CancellationToken cancellationToken = default) =>
+        UpdateAsync(id, document =>
+        {
+            document.Status = DocumentStatus.Cancelled;
+            document.ErrorMessage = null;
+        }, cancellationToken);
 
     /// <summary>Marks the document as <see cref="DocumentStatus.Failed"/> and stores the error message.</summary>
     public Task MarkFailedAsync(Guid id, string error, CancellationToken cancellationToken = default) =>

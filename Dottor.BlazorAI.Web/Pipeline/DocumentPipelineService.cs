@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using Dottor.BlazorAI.Web.Services;
 using Microsoft.Agents.AI.Workflows;
@@ -11,6 +12,8 @@ public sealed class DocumentPipelineService(
     DocumentImageGenerator imageGenerator,
     ILogger<DocumentPipelineService> logger)
 {
+    private readonly ConcurrentDictionary<Guid, PendingApproval> _pendingApprovals = new();
+
     public async IAsyncEnumerable<PipelineUpdate> ProcessAsync(
         Guid documentId,
         [EnumeratorCancellation] CancellationToken cancellationToken)
@@ -26,54 +29,111 @@ public sealed class DocumentPipelineService(
         await using var events = run.WatchStreamAsync(cancellationToken).GetAsyncEnumerator(cancellationToken);
         var failureReported = false;
 
-        while (true)
+        try
         {
-            WorkflowEvent? workflowEvent = null;
-            Exception? moveError = null;
-            var hasEvent = false;
-
-            try
+            while (true)
             {
-                hasEvent = await events.MoveNextAsync();
-                if (hasEvent)
+                WorkflowEvent? workflowEvent = null;
+                Exception? moveError = null;
+                var hasEvent = false;
+
+                try
                 {
-                    workflowEvent = events.Current;
+                    hasEvent = await events.MoveNextAsync();
+                    if (hasEvent)
+                    {
+                        workflowEvent = events.Current;
+                    }
                 }
-            }
-            catch (Exception ex)
-            {
-                moveError = ex;
-            }
-
-            if (moveError is not null)
-            {
-                var message = ErrorMessage(moveError);
-                await documents.MarkFailedAsync(documentId, message, CancellationToken.None);
-                logger.LogError(moveError, "Document pipeline failed for {DocumentId}", documentId);
-                if (!failureReported)
+                catch (Exception ex)
                 {
-                    yield return new("Pipeline", PipelineUpdateStatus.Failed, message);
+                    moveError = ex;
                 }
-                yield break;
-            }
 
-            if (!hasEvent)
-            {
-                yield break;
-            }
-
-            var update = Map(workflowEvent!);
-            if (update is not null)
-            {
-                if (update.Status == PipelineUpdateStatus.Failed && failureReported)
+                if (moveError is OperationCanceledException)
                 {
+                    await documents.MarkCancelledAsync(documentId, CancellationToken.None);
+                    logger.LogInformation("Document pipeline cancelled for {DocumentId}", documentId);
+                    yield return new("Pipeline", PipelineUpdateStatus.Cancelled, "Elaborazione annullata.");
+                    yield break;
+                }
+
+                if (moveError is not null)
+                {
+                    var message = ErrorMessage(moveError);
+                    await documents.MarkFailedAsync(documentId, message, CancellationToken.None);
+                    logger.LogError(moveError, "Document pipeline failed for {DocumentId}", documentId);
+                    if (!failureReported)
+                    {
+                        yield return new("Pipeline", PipelineUpdateStatus.Failed, message);
+                    }
+                    yield break;
+                }
+
+                if (!hasEvent)
+                {
+                    yield break;
+                }
+
+                if (workflowEvent is RequestInfoEvent requestEvent &&
+                    requestEvent.Request.TryGetDataAs<ImageApprovalRequest>(out var request))
+                {
+                    if (!_pendingApprovals.TryAdd(documentId, new(run, requestEvent.Request)))
+                    {
+                        throw new InvalidOperationException("Esiste già una richiesta di approvazione per il documento.");
+                    }
+
+                    yield return new(
+                        "Approval",
+                        PipelineUpdateStatus.WaitingForApproval,
+                        "In attesa di approvazione",
+                        ImagePrompt: request.Prompt,
+                        RequestId: requestEvent.Request.RequestId);
                     continue;
                 }
 
-                failureReported = update.Status == PipelineUpdateStatus.Failed;
-                yield return update;
+                var update = Map(workflowEvent!);
+                if (update is not null)
+                {
+                    if (update.Status == PipelineUpdateStatus.Failed && failureReported)
+                    {
+                        continue;
+                    }
+
+                    failureReported = update.Status == PipelineUpdateStatus.Failed;
+                    yield return update;
+                }
             }
         }
+        finally
+        {
+            _pendingApprovals.TryRemove(documentId, out _);
+        }
+    }
+
+    public async Task RespondAsync(
+        Guid documentId,
+        bool approved,
+        string? prompt,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!_pendingApprovals.TryGetValue(documentId, out var pending))
+        {
+            throw new InvalidOperationException("Il workflow non è in attesa di approvazione.");
+        }
+
+        var effectivePrompt = approved ? prompt?.Trim() : null;
+        if (approved && string.IsNullOrWhiteSpace(effectivePrompt))
+        {
+            throw new InvalidOperationException("Il prompt approvato non può essere vuoto.");
+        }
+
+        var response = pending.Request.CreateResponse(
+            new ImageApprovalDecision(documentId, approved, effectivePrompt));
+        await pending.Run.SendResponseAsync(response);
+        _pendingApprovals.TryRemove(documentId, out _);
     }
 
     private Workflow BuildWorkflow()
@@ -81,20 +141,33 @@ public sealed class DocumentPipelineService(
         Func<PipelineState, CancellationToken, ValueTask<PipelineState>> extract = ExtractTextAsync;
         Func<PipelineState, CancellationToken, ValueTask<PipelineState>> summarize = SummarizeAsync;
         Func<PipelineState, CancellationToken, ValueTask<PipelineState>> categorize = CategorizeAsync;
+        Func<PipelineState, CancellationToken, ValueTask<ImageApprovalRequest>> createPrompt = GenerateImagePromptAsync;
+        Func<ImageApprovalDecision, CancellationToken, ValueTask<PipelineState>> applyApproval = ApplyApprovalAsync;
         Func<PipelineState, CancellationToken, ValueTask<PipelineState>> generateImage = GenerateImageAsync;
+        Func<PipelineState, CancellationToken, ValueTask<PipelineState>> reject = RejectAsync;
         Func<PipelineState, CancellationToken, ValueTask<PipelineState>> complete = CompleteAsync;
 
         var extractExecutor = extract.BindAsExecutor("ExtractText");
         var summaryExecutor = summarize.BindAsExecutor("Summary");
         var categoryExecutor = categorize.BindAsExecutor("Category");
+        var promptExecutor = createPrompt.BindAsExecutor("ImagePrompt");
+        var approvalPort = RequestPort.Create<ImageApprovalRequest, ImageApprovalDecision>("ImageApproval");
+        var approvalExecutor = approvalPort.BindAsExecutor();
+        var applyApprovalExecutor = applyApproval.BindAsExecutor("Approval");
         var imageExecutor = generateImage.BindAsExecutor("Image");
+        var rejectExecutor = reject.BindAsExecutor("Rejected");
         var completeExecutor = complete.BindAsExecutor("Complete");
 
         return new WorkflowBuilder(extractExecutor)
             .AddEdge(extractExecutor, summaryExecutor)
             .AddEdge(summaryExecutor, categoryExecutor)
-            .AddEdge(categoryExecutor, imageExecutor)
+            .AddEdge(categoryExecutor, promptExecutor)
+            .AddEdge(promptExecutor, approvalExecutor)
+            .AddEdge(approvalExecutor, applyApprovalExecutor)
+            .AddEdge<PipelineState>(applyApprovalExecutor, imageExecutor, state => state?.IsApproved == true)
+            .AddEdge<PipelineState>(applyApprovalExecutor, rejectExecutor, state => state?.IsApproved == false)
             .AddEdge(imageExecutor, completeExecutor)
+            .AddEdge(rejectExecutor, completeExecutor)
             .WithOutputFrom(completeExecutor)
             .Build();
     }
@@ -147,19 +220,74 @@ public sealed class DocumentPipelineService(
         });
     }
 
+    private async ValueTask<ImageApprovalRequest> GenerateImagePromptAsync(
+        PipelineState state,
+        CancellationToken cancellationToken)
+    {
+        return await RunStepAsync("ImagePrompt", state.DocumentId, async () =>
+        {
+            var document = await documents.GetAsync(state.DocumentId, cancellationToken)
+                ?? throw new InvalidOperationException("Documento non trovato.");
+            var prompt = await chat.AskAsync($"""
+                Crea un prompt in inglese per un modello di generazione immagini.
+                Il risultato deve descrivere una singola illustrazione editoriale pulita, significativa,
+                senza testo, loghi o watermark. Rispondi esclusivamente con il prompt.
+
+                Nome documento: {document.FileName}
+                Categoria: {state.Category}
+                Riassunto: {state.Summary}
+                """, cancellationToken);
+            prompt = prompt.Trim().Trim('"');
+            await documents.SaveImagePromptAsync(state.DocumentId, prompt, cancellationToken);
+            return new ImageApprovalRequest(state.DocumentId, prompt);
+        });
+    }
+
+    private async ValueTask<PipelineState> ApplyApprovalAsync(
+        ImageApprovalDecision decision,
+        CancellationToken cancellationToken)
+    {
+        return await RunStepAsync("Approval", decision.DocumentId, async () =>
+        {
+            var document = await documents.GetAsync(decision.DocumentId, cancellationToken)
+                ?? throw new InvalidOperationException("Documento non trovato.");
+
+            if (!decision.Approved)
+            {
+                await documents.RejectImagePromptAsync(decision.DocumentId, cancellationToken);
+                return new PipelineState(
+                    decision.DocumentId, document.ExtractedText, document.Summary, document.Category, false);
+            }
+
+            await documents.ApproveImagePromptAsync(
+                decision.DocumentId, decision.Prompt!, cancellationToken);
+            return new PipelineState(
+                decision.DocumentId,
+                document.ExtractedText,
+                document.Summary,
+                document.Category,
+                true,
+                decision.Prompt);
+        });
+    }
+
     private async ValueTask<PipelineState> GenerateImageAsync(
         PipelineState state,
         CancellationToken cancellationToken)
     {
         return await RunStepAsync("Image", state.DocumentId, async () =>
         {
-            var image = await imageGenerator.GenerateAsync(
-                state.Summary!, state.Category!, cancellationToken);
+            var image = await imageGenerator.GenerateAsync(state.ApprovedImagePrompt!, cancellationToken);
             await documents.SaveImageAsync(
                 state.DocumentId, image.Content, image.ContentType, cancellationToken);
             return state;
         });
     }
+
+    private ValueTask<PipelineState> RejectAsync(
+        PipelineState state,
+        CancellationToken cancellationToken) =>
+        new(RunStepAsync("Rejected", state.DocumentId, () => Task.FromResult(state)));
 
     private async ValueTask<PipelineState> CompleteAsync(
         PipelineState state,
@@ -167,15 +295,19 @@ public sealed class DocumentPipelineService(
     {
         return await RunStepAsync("Complete", state.DocumentId, async () =>
         {
-            await documents.MarkCompletedAsync(state.DocumentId, cancellationToken);
+            if (state.IsApproved)
+            {
+                await documents.MarkCompletedAsync(state.DocumentId, cancellationToken);
+            }
+
             return state;
         });
     }
 
-    private async Task<PipelineState> RunStepAsync(
+    private async Task<T> RunStepAsync<T>(
         string step,
         Guid documentId,
-        Func<Task<PipelineState>> action)
+        Func<Task<T>> action)
     {
         logger.LogInformation("Starting {Step} for document {DocumentId}", step, documentId);
         try
@@ -187,7 +319,7 @@ public sealed class DocumentPipelineService(
         catch (OperationCanceledException)
         {
             logger.LogInformation("Cancelled {Step} for document {DocumentId}", step, documentId);
-            await documents.MarkFailedAsync(documentId, "Elaborazione annullata.", CancellationToken.None);
+            await documents.MarkCancelledAsync(documentId, CancellationToken.None);
             throw;
         }
         catch (Exception ex)
@@ -200,9 +332,9 @@ public sealed class DocumentPipelineService(
 
     private static PipelineUpdate? Map(WorkflowEvent workflowEvent) => workflowEvent switch
     {
-        ExecutorInvokedEvent started => new(
+        ExecutorInvokedEvent started when started.ExecutorId != "ImageApproval" => new(
             started.ExecutorId, PipelineUpdateStatus.Started, $"{DisplayName(started.ExecutorId)}..."),
-        ExecutorCompletedEvent completed => Completed(completed.ExecutorId, completed.Data as PipelineState),
+        ExecutorCompletedEvent completed => Completed(completed.ExecutorId, completed.Data),
         ExecutorFailedEvent failed => new(
             failed.ExecutorId, PipelineUpdateStatus.Failed, ErrorMessage(failed.Data)),
         WorkflowErrorEvent error => new(
@@ -210,20 +342,38 @@ public sealed class DocumentPipelineService(
         _ => null
     };
 
-    private static PipelineUpdate Completed(string step, PipelineState? state) => new(
-        step,
-        PipelineUpdateStatus.Completed,
-        DisplayName(step),
-        step == "Summary" ? state?.Summary : null,
-        step == "Category" ? state?.Category : null,
-        step == "Image");
+    private static PipelineUpdate? Completed(string step, object? data)
+    {
+        if (step == "ImageApproval")
+        {
+            return null;
+        }
+
+        var state = data as PipelineState;
+        var request = data as ImageApprovalRequest;
+        var status = (step is "Approval" or "Rejected") && state?.IsApproved == false
+            ? PipelineUpdateStatus.Rejected
+            : PipelineUpdateStatus.Completed;
+
+        return new(
+            step,
+            status,
+            DisplayName(step),
+            step == "Summary" ? state?.Summary : null,
+            step == "Category" ? state?.Category : null,
+            step == "Image",
+            step == "ImagePrompt" ? request?.Prompt : null);
+    }
 
     private static string DisplayName(string step) => step switch
     {
         "ExtractText" => "Testo estratto",
-        "Summary" => "Riassunto",
-        "Category" => "Categorizzazione",
+        "Summary" => "Riassunto completato",
+        "Category" => "Categorizzazione completata",
+        "ImagePrompt" => "Prompt immagine generato",
+        "Approval" => "Approvazione ricevuta",
         "Image" => "Immagine generata",
+        "Rejected" => "Generazione immagine rifiutata",
         "Complete" => "Elaborazione completata",
         _ => step
     };
@@ -239,5 +389,13 @@ public sealed class DocumentPipelineService(
         Guid DocumentId,
         string? ExtractedText = null,
         string? Summary = null,
-        string? Category = null);
+        string? Category = null,
+        bool IsApproved = false,
+        string? ApprovedImagePrompt = null);
+
+    private sealed record ImageApprovalRequest(Guid DocumentId, string Prompt);
+
+    private sealed record ImageApprovalDecision(Guid DocumentId, bool Approved, string? Prompt);
+
+    private sealed record PendingApproval(StreamingRun Run, ExternalRequest Request);
 }

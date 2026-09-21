@@ -10,6 +10,10 @@ public sealed class Document
     public DocumentStatus Status { get; set; }
     public string? Summary { get; set; }
     public string? Category { get; set; }
+    public string? GeneratedImagePrompt { get; set; }
+    public string? ApprovedImagePrompt { get; set; }
+    public ApprovalStatus? ApprovalStatus { get; set; }
+    public DateTimeOffset? ApprovedAt { get; set; }
     public byte[]? GeneratedImage { get; set; }
     public string? GeneratedImageContentType { get; set; }
     public string? ErrorMessage { get; set; }
@@ -22,5 +26,14 @@ public enum DocumentStatus
     Uploaded,
     Processing,
     Completed,
+    Rejected,
+    Cancelled,
     Failed
+}
+
+public enum ApprovalStatus
+{
+    Pending,
+    Approved,
+    Rejected
 }

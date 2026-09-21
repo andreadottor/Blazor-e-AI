@@ -18,17 +18,15 @@ public sealed class DocumentImageGenerator(IConfiguration configuration) : IDisp
     private readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromMinutes(3) };
 
     /// <summary>
-    /// Builds a prompt from the document <paramref name="summary"/> and <paramref name="category"/>,
-    /// requests an image from the model and returns its bytes together with the content type.
+    /// Uses the exact human-approved <paramref name="prompt"/>, requests an image from the model and
+    /// returns its bytes together with the content type.
     /// </summary>
-    /// <param name="summary">The AI-generated summary of the document.</param>
-    /// <param name="category">The AI-generated category of the document.</param>
+    /// <param name="prompt">The prompt approved in the workflow's human-in-the-loop step.</param>
     /// <param name="cancellationToken">Token used to cancel the HTTP request.</param>
     /// <returns>The generated image bytes and their content type (PNG).</returns>
     /// <exception cref="InvalidOperationException">Thrown when the AI configuration is missing or the model does not return an image.</exception>
     public async Task<(byte[] Content, string ContentType)> GenerateAsync(
-        string summary,
-        string category,
+        string prompt,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(configuration["AI:OpenAI:ApiKey"]))
@@ -42,12 +40,6 @@ public sealed class DocumentImageGenerator(IConfiguration configuration) : IDisp
             throw new InvalidOperationException(
                 "Configura AI:OpenAI:ImageModel con un deployment Foundry compatibile con image generation.");
         }
-
-        var prompt = $"""
-            Crea un'illustrazione editoriale pulita, senza testo e adatta a rappresentare un documento.
-            Categoria: {category}
-            Riassunto: {summary}
-            """;
 
         var endpoint = GetImageEndpoint();
         using var request = new HttpRequestMessage(HttpMethod.Post, endpoint);
