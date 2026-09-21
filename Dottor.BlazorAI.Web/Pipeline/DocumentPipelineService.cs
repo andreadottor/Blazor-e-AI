@@ -5,7 +5,12 @@ using Microsoft.Agents.AI.Workflows;
 
 namespace Dottor.BlazorAI.Web.Pipeline;
 
-public sealed class DocumentPipelineService(DocumentService documents, DocumentTextExtractor textExtractor, ChatService chat, DocumentImageGenerator imageGenerator, ILogger<DocumentPipelineService> logger)
+public sealed class DocumentPipelineService(
+                        DocumentService documents, 
+                        DocumentTextExtractor textExtractor, 
+                        ChatService chat, 
+                        DocumentImageGenerator imageGenerator, 
+                        ILogger<DocumentPipelineService> logger)
 {
     private readonly ConcurrentDictionary<Guid, PendingApproval> _pendingApprovals = new();
 
@@ -116,33 +121,32 @@ public sealed class DocumentPipelineService(DocumentService documents, DocumentT
             throw new InvalidOperationException("Il prompt approvato non può essere vuoto.");
         }
 
-        var response = pending.Request.CreateResponse(
-            new ImageApprovalDecision(documentId, approved, effectivePrompt));
+        var response = pending.Request.CreateResponse(new ImageApprovalDecision(documentId, approved, effectivePrompt));
         await pending.Run.SendResponseAsync(response);
         _pendingApprovals.TryRemove(documentId, out _);
     }
 
     private Workflow BuildWorkflow()
     {
-        Func<PipelineState, CancellationToken, ValueTask<PipelineState>> extract = ExtractTextAsync;
-        Func<PipelineState, CancellationToken, ValueTask<PipelineState>> summarize = SummarizeAsync;
-        Func<PipelineState, CancellationToken, ValueTask<PipelineState>> categorize = CategorizeAsync;
-        Func<PipelineState, CancellationToken, ValueTask<ImageApprovalRequest>> createPrompt = GenerateImagePromptAsync;
+        Func<PipelineState, CancellationToken, ValueTask<PipelineState>> extract       = ExtractTextAsync;
+        Func<PipelineState, CancellationToken, ValueTask<PipelineState>> summarize     = SummarizeAsync;
+        Func<PipelineState, CancellationToken, ValueTask<PipelineState>> categorize    = CategorizeAsync;
+        Func<PipelineState, CancellationToken, ValueTask<ImageApprovalRequest>> createPrompt   = GenerateImagePromptAsync;
         Func<ImageApprovalDecision, CancellationToken, ValueTask<PipelineState>> applyApproval = ApplyApprovalAsync;
         Func<PipelineState, CancellationToken, ValueTask<PipelineState>> generateImage = GenerateImageAsync;
-        Func<PipelineState, CancellationToken, ValueTask<PipelineState>> reject = RejectAsync;
-        Func<PipelineState, CancellationToken, ValueTask<PipelineState>> complete = CompleteAsync;
+        Func<PipelineState, CancellationToken, ValueTask<PipelineState>> reject        = RejectAsync;
+        Func<PipelineState, CancellationToken, ValueTask<PipelineState>> complete      = CompleteAsync;
 
-        var extractExecutor     = extract.BindAsExecutor("ExtractText");
-        var summaryExecutor     = summarize.BindAsExecutor("Summary");
-        var categoryExecutor    = categorize.BindAsExecutor("Category");
-        var promptExecutor      = createPrompt.BindAsExecutor("ImagePrompt");
-        var approvalPort        = RequestPort.Create<ImageApprovalRequest, ImageApprovalDecision>("ImageApproval");
-        var approvalExecutor    = approvalPort.BindAsExecutor();
+        var extractExecutor       = extract.BindAsExecutor("ExtractText");
+        var summaryExecutor       = summarize.BindAsExecutor("Summary");
+        var categoryExecutor      = categorize.BindAsExecutor("Category");
+        var promptExecutor        = createPrompt.BindAsExecutor("ImagePrompt");
+        var approvalPort          = RequestPort.Create<ImageApprovalRequest, ImageApprovalDecision>("ImageApproval");
+        var approvalExecutor      = approvalPort.BindAsExecutor();
         var applyApprovalExecutor = applyApproval.BindAsExecutor("Approval");
-        var imageExecutor       = generateImage.BindAsExecutor("Image");
-        var rejectExecutor      = reject.BindAsExecutor("Rejected");
-        var completeExecutor    = complete.BindAsExecutor("Complete");
+        var imageExecutor         = generateImage.BindAsExecutor("Image");
+        var rejectExecutor        = reject.BindAsExecutor("Rejected");
+        var completeExecutor      = complete.BindAsExecutor("Complete");
 
         return new WorkflowBuilder(extractExecutor)
             .AddEdge(extractExecutor, summaryExecutor)
@@ -228,18 +232,20 @@ public sealed class DocumentPipelineService(DocumentService documents, DocumentT
     {
         return await RunStepAsync("Approval", decision.DocumentId, async () =>
         {
-            var document = await documents.GetAsync(decision.DocumentId, ct)
-                ?? throw new InvalidOperationException("Documento non trovato.");
+            var document = await documents.GetAsync(decision.DocumentId, ct) ?? throw new InvalidOperationException("Documento non trovato.");
 
             if (!decision.Approved)
             {
                 await documents.RejectImagePromptAsync(decision.DocumentId, ct);
                 return new PipelineState(
-                    decision.DocumentId, document.ExtractedText, document.Summary, document.Category, false);
+                    decision.DocumentId, 
+                    document.ExtractedText, 
+                    document.Summary, 
+                    document.Category, 
+                    false);
             }
 
             await documents.ApproveImagePromptAsync(decision.DocumentId, decision.Prompt!, ct);
-
             return new PipelineState(
                 decision.DocumentId,
                 document.ExtractedText,

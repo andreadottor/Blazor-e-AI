@@ -72,10 +72,7 @@ else
                         <td>
                             @if (document.ImageAvailable)
                             {
-                                <a href="@($"/documents/{document.Id}/image")"
-                                   target="_blank"
-                                   rel="noopener"
-                                   aria-label="@($"Open generated image for {document.FileName}")">
+                                <a href="@($"/documents/{document.Id}/image")" target="_blank" rel="noopener" aria-label="@($"Open generated image for {document.FileName}")">
                                     <img class="img-thumbnail document-thumbnail"
                                          src="@($"/documents/{document.Id}/image")"
                                          alt="@($"Generated image for {document.FileName}")" />
@@ -108,14 +105,11 @@ else
                         <td class="text-nowrap">@FormatDate(document.UpdatedAt)</td>
                         <td>
                             <div class="d-flex justify-content-end gap-2">
-                                <a class="btn btn-sm @(document.Status == DocumentStatus.WaitingForApproval ? "btn-warning" : "btn-outline-primary")"
+                                <a class="btn btn-sm @(document.Status == DocumentStatus.WaitingForApproval ? "btn-warning" : "btn-outline-primary")" 
                                    href="@($"/documents/{document.Id}")">
                                     @(document.Status == DocumentStatus.WaitingForApproval ? "Review" : "Open")
                                 </a>
-                                <a class="btn btn-sm btn-outline-secondary"
-                                   href="@($"/documents/{document.Id}/pdf")"
-                                   target="_blank"
-                                   rel="noopener">PDF</a>
+                                <a class="btn btn-sm btn-outline-secondary" href="@($"/documents/{document.Id}/pdf")" target="_blank" rel="noopener">PDF</a>
                             </div>
                         </td>
                     </tr>

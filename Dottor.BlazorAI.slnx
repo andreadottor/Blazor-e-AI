@@ -1,4 +1,8 @@
 <Solution>
+  <Folder Name="/Solution Items/">
+    <File Path=".gitignore" />
+    <File Path="README.md" />
+  </Folder>
   <Project Path="Dottor.BlazorAI.AppHost/Dottor.BlazorAI.AppHost.csproj" />
   <Project Path="Dottor.BlazorAI.ServiceDefaults/Dottor.BlazorAI.ServiceDefaults.csproj" />
   <Project Path="Dottor.BlazorAI.Web/Dottor.BlazorAI.Web.csproj" />
