@@ -32,35 +32,3 @@ else if (!string.IsNullOrWhiteSpace(answer))
         <div class="markdown-body">@((MarkupString)Markdown.ToHtml(answer, markdownPipeline))</div>
     </section>
 }
-
-@code {
-    private string prompt = "Spiegami in modo semplice perché IAsyncEnumerable è utile in una UI Blazor.";
-    private string? answer;
-    private string? error;
-    private bool isLoading;
-
-    private static readonly MarkdownPipeline markdownPipeline = new MarkdownPipelineBuilder()
-        .UseAdvancedExtensions()
-        .UseColorCode()
-        .Build();
-
-    private async Task AskAsync()
-    {
-        isLoading = true;
-        answer = null;
-        error = null;
-
-        try
-        {
-            answer = await Chat.AskAsync(prompt, CancellationToken.None);
-        }
-        catch (Exception ex)
-        {
-            error = ex.Message;
-        }
-        finally
-        {
-            isLoading = false;
-        }
-    }
-}
