@@ -19,14 +19,13 @@ public sealed record DocumentProcessingRequest(Guid JobId, Guid DocumentId);
 /// </remarks>
 public sealed class DocumentProcessingQueue
 {
-    private readonly Channel<DocumentProcessingRequest> _queue =
-        Channel.CreateUnbounded<DocumentProcessingRequest>();
+    private readonly Channel<DocumentProcessingRequest> _queue = Channel.CreateUnbounded<DocumentProcessingRequest>();
 
     /// <summary>Adds a processing request to the queue.</summary>
-    public ValueTask EnqueueAsync(DocumentProcessingRequest request, CancellationToken cancellationToken) =>
-        _queue.Writer.WriteAsync(request, cancellationToken);
+    public ValueTask EnqueueAsync(DocumentProcessingRequest request, CancellationToken ct) =>
+        _queue.Writer.WriteAsync(request, ct);
 
     /// <summary>Asynchronously reads all queued requests until the channel is completed or cancelled.</summary>
-    public IAsyncEnumerable<DocumentProcessingRequest> ReadAllAsync(CancellationToken cancellationToken) =>
-        _queue.Reader.ReadAllAsync(cancellationToken);
+    public IAsyncEnumerable<DocumentProcessingRequest> ReadAllAsync(CancellationToken ct) =>
+        _queue.Reader.ReadAllAsync(ct);
 }

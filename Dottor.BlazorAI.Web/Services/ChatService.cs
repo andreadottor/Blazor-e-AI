@@ -23,12 +23,12 @@ public sealed class ChatService(IChatClient chatClient, IConfiguration configura
     /// generation has completed. Used by <b>Demo 1</b> (<c>/demo1</c>).
     /// </summary>
     /// <param name="prompt">The user prompt sent to the model.</param>
-    /// <param name="cancellationToken">Token used to cancel the request.</param>
+    /// <param name="ct">Token used to cancel the request.</param>
     /// <returns>The complete text produced by the model.</returns>
-    public async Task<string> AskAsync(string prompt, CancellationToken cancellationToken)
+    public async Task<string> AskAsync(string prompt, CancellationToken ct)
     {
         EnsureConfigured();
-        var response = await chatClient.GetResponseAsync(prompt, cancellationToken: cancellationToken);
+        var response = await chatClient.GetResponseAsync(prompt, cancellationToken: ct);
         return response.Text;
     }
 
@@ -37,17 +37,13 @@ public sealed class ChatService(IChatClient chatClient, IConfiguration configura
     /// model produces it, so the UI can render tokens as they arrive. Used by <b>Demo 2</b> (<c>/demo2</c>).
     /// </summary>
     /// <param name="prompt">The user prompt sent to the model.</param>
-    /// <param name="cancellationToken">Token used to cancel the streaming enumeration.</param>
+    /// <param name="ct">Token used to cancel the streaming enumeration.</param>
     /// <returns>An asynchronous stream of text chunks that make up the full answer.</returns>
-    public async IAsyncEnumerable<string> AskStreamingAsync(
-        string prompt,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+    public async IAsyncEnumerable<string> AskStreamingAsync(string prompt, [EnumeratorCancellation] CancellationToken ct)
     {
         EnsureConfigured();
 
-        await foreach (var update in chatClient.GetStreamingResponseAsync(
-            prompt,
-            cancellationToken: cancellationToken))
+        await foreach (var update in chatClient.GetStreamingResponseAsync(prompt, cancellationToken: ct))
         {
             if (!string.IsNullOrEmpty(update.Text))
             {
@@ -63,8 +59,7 @@ public sealed class ChatService(IChatClient chatClient, IConfiguration configura
     {
         if (string.IsNullOrWhiteSpace(configuration["AI:OpenAI:ApiKey"]))
         {
-            throw new InvalidOperationException(
-                "Configura i secret AI:OpenAI dell'AppHost per eseguire le demo AI.");
+            throw new InvalidOperationException("Configura i secret AI:OpenAI dell'AppHost per eseguire le demo AI.");
         }
     }
 }

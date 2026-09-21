@@ -22,23 +22,19 @@ public sealed class DocumentImageGenerator(IConfiguration configuration) : IDisp
     /// returns its bytes together with the content type.
     /// </summary>
     /// <param name="prompt">The prompt approved in the workflow's human-in-the-loop step.</param>
-    /// <param name="cancellationToken">Token used to cancel the HTTP request.</param>
+    /// <param name="ct">Token used to cancel the HTTP request.</param>
     /// <returns>The generated image bytes and their content type (PNG).</returns>
     /// <exception cref="InvalidOperationException">Thrown when the AI configuration is missing or the model does not return an image.</exception>
-    public async Task<(byte[] Content, string ContentType)> GenerateAsync(
-        string prompt,
-        CancellationToken cancellationToken)
+    public async Task<(byte[] Content, string ContentType)> GenerateAsync(string prompt, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(configuration["AI:OpenAI:ApiKey"]))
         {
-            throw new InvalidOperationException(
-                "Configura i secret AI:OpenAI dell'AppHost per generare immagini.");
+            throw new InvalidOperationException("Configura i secret AI:OpenAI dell'AppHost per generare immagini.");
         }
 
         if (string.IsNullOrWhiteSpace(configuration["AI:OpenAI:ImageModel"]))
         {
-            throw new InvalidOperationException(
-                "Configura AI:OpenAI:ImageModel con un deployment Foundry compatibile con image generation.");
+            throw new InvalidOperationException("Configura AI:OpenAI:ImageModel con un deployment Foundry compatibile con image generation.");
         }
 
         var endpoint = GetImageEndpoint();
@@ -53,12 +49,11 @@ public sealed class DocumentImageGenerator(IConfiguration configuration) : IDisp
         });
         request.Content = new StringContent(requestJson, Encoding.UTF8, "application/json");
 
-        using var response = await _httpClient.SendAsync(request, cancellationToken);
-        var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
+        using var response = await _httpClient.SendAsync(request, ct);
+        var responseJson = await response.Content.ReadAsStringAsync(ct);
         if (!response.IsSuccessStatusCode)
         {
-            throw new InvalidOperationException(
-                $"Generazione immagine non riuscita ({(int)response.StatusCode}): {responseJson}");
+            throw new InvalidOperationException($"Generazione immagine non riuscita ({(int)response.StatusCode}): {responseJson}");
         }
 
         var result = JsonSerializer.Deserialize<MaiImageResponse>(responseJson, JsonSerializerOptions.Web);
@@ -97,8 +92,7 @@ public sealed class DocumentImageGenerator(IConfiguration configuration) : IDisp
         }
         else
         {
-            throw new InvalidOperationException(
-                "L'endpoint configurato non consente di ricavare l'endpoint MAI della risorsa Foundry.");
+            throw new InvalidOperationException("L'endpoint configurato non consente di ricavare l'endpoint MAI della risorsa Foundry.");
         }
 
         return new Uri($"https://{imageHost}/mai/v1/images/generations");
@@ -106,8 +100,7 @@ public sealed class DocumentImageGenerator(IConfiguration configuration) : IDisp
 
     private sealed record MaiImageResponse(MaiImageResult[] Data);
 
-    private sealed record MaiImageResult(
-        [property: JsonPropertyName("b64_json")] string Base64Json);
+    private sealed record MaiImageResult([property: JsonPropertyName("b64_json")] string Base64Json);
 
     /// <summary>
     /// Releases the underlying <see cref="HttpClient"/>.
