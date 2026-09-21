@@ -1,67 +1,82 @@
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using Dottor.BlazorAI.Web.Pipeline;
 
 namespace Dottor.BlazorAI.Web.Background;
 
 /// <summary>
-/// In-memory hub that connects a background job to the single Blazor component watching its progress.
-/// Each job owns one <see cref="Channel{T}"/> of <see cref="PipelineUpdate"/> messages, so this is a
-/// one-writer/one-reader relay rather than a general pub/sub abstraction.
+/// In-memory fan-out for live updates. SQL Server owns the current state; these channels only carry
+/// updates produced after a UI subscriber connects.
 /// </summary>
-/// <remarks>
-/// Data flow reference: used by <b>Demo 4</b> (<c>/demo4</c>). The <see cref="DocumentProcessingWorker"/>
-/// publishes updates and the page streams them via <see cref="WatchAsync"/>.
-/// </remarks>
-public sealed class DocumentUpdateHub
+public sealed class DocumentUpdateHub(ILogger<DocumentUpdateHub> logger)
 {
-    // Each job has a single UI watcher: this is not a pub/sub abstraction.
-    private readonly ConcurrentDictionary<Guid, Channel<PipelineUpdate>> _jobs = new();
+    private readonly ConcurrentDictionary<Guid, ConcurrentDictionary<Guid, Channel<PipelineUpdate>>> _documents = new();
 
-    /// <summary>Registers a new job and creates the channel that will carry its progress updates.</summary>
-    /// <exception cref="InvalidOperationException">Thrown when a job with the same id already exists.</exception>
-    public void Create(Guid jobId)
+    public bool HasSubscribers(Guid documentId) 
+        => _documents.TryGetValue(documentId, out var subscribers) && !subscribers.IsEmpty;
+
+    public async IAsyncEnumerable<PipelineUpdate> SubscribeAsync(Guid documentId, [EnumeratorCancellation] CancellationToken ct)
     {
-        if (!_jobs.TryAdd(jobId, Channel.CreateUnbounded<PipelineUpdate>()))
+        var subscriptionId = Guid.NewGuid();
+        var channel = Channel.CreateUnbounded<PipelineUpdate>(new UnboundedChannelOptions
         {
-            throw new InvalidOperationException("Job already exists.");
-        }
-    }
+            SingleReader = true,
+            SingleWriter = false
+        });
+        var subscribers = _documents.GetOrAdd(documentId, _ => new());
+        subscribers[subscriptionId] = channel;
+        logger.LogInformation("Subscriber {SubscriptionId} added for document {DocumentId}; active subscribers: {SubscriberCount}", subscriptionId, documentId, subscribers.Count);
 
-    /// <summary>Publishes a progress update for the given job (called by the background worker).</summary>
-    public ValueTask PublishAsync(Guid jobId, PipelineUpdate update, CancellationToken cancellationToken) =>
-        Get(jobId).Writer.WriteAsync(update, cancellationToken);
-
-    /// <summary>Signals that no more updates will be produced for the given job.</summary>
-    public void Complete(Guid jobId) => Get(jobId).Writer.TryComplete();
-
-    /// <summary>
-    /// Streams the progress updates of a job to the UI until the job completes, removing the channel afterwards.
-    /// </summary>
-    public async IAsyncEnumerable<PipelineUpdate> WatchAsync(
-        Guid jobId,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
-    {
-        var channel = Get(jobId);
         try
         {
-            await foreach (var update in channel.Reader.ReadAllAsync(cancellationToken))
+            await foreach (var update in channel.Reader.ReadAllAsync(ct))
             {
                 yield return update;
             }
         }
         finally
         {
-            if (channel.Reader.Completion.IsCompleted)
+            subscribers.TryRemove(subscriptionId, out _);
+            if (subscribers.IsEmpty)
             {
-                _jobs.TryRemove(jobId, out _);
+                _documents.TryRemove(new KeyValuePair<Guid, ConcurrentDictionary<Guid, Channel<PipelineUpdate>>>(documentId, subscribers));
             }
+
+            logger.LogInformation("Subscriber {SubscriptionId} removed for document {DocumentId}; active subscribers: {SubscriberCount}", subscriptionId, documentId, subscribers.Count);
         }
     }
 
-    /// <summary>Resolves the channel for a job or throws when the job is unknown or already consumed.</summary>
-    private Channel<PipelineUpdate> Get(Guid jobId) =>
-        _jobs.TryGetValue(jobId, out var channel)
-            ? channel
-            : throw new KeyNotFoundException("Job not found or already being watched.");
+    public Task<int> PublishAsync(Guid documentId, PipelineUpdate update, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        var delivered = 0;
+
+        if (_documents.TryGetValue(documentId, out var subscribers))
+        {
+            foreach (var channel in subscribers.Values)
+            {
+                if (channel.Writer.TryWrite(update))
+                {
+                    delivered++;
+                }
+            }
+        }
+
+        logger.LogInformation("Published {Step}/{Status} for document {DocumentId} to {SubscriberCount} subscriber(s)", update.Step, update.Status, documentId, delivered);
+        return Task.FromResult(delivered);
+    }
+
+    public void Complete(Guid documentId)
+    {
+        if (!_documents.TryRemove(documentId, out var subscribers))
+        {
+            return;
+        }
+
+        foreach (var channel in subscribers.Values)
+        {
+            channel.Writer.TryComplete();
+        }
+    }
 }

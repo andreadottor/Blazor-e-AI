@@ -5,11 +5,12 @@
     <div class="card mb-4">
         <div class="card-body">
             <div><strong>Documento:</strong> @FileName</div>
+            <div class="text-secondary small"><strong>Document ID:</strong> @DocumentId</div>
             @if (JobId is not null)
             {
                 <div class="text-secondary small"><strong>Job ID:</strong> @JobId</div>
-                <div class="text-secondary small"><strong>Stato:</strong> @JobStatus</div>
             }
+            <div class="text-secondary small"><strong>Stato:</strong> @(PersistentStatus ?? JobStatus)</div>
             <a class="btn btn-sm btn-outline-secondary mt-2" href="@($"/documents/{DocumentId}/pdf")" target="_blank">
                 Apri PDF originale
             </a>
@@ -87,6 +88,7 @@
     [Parameter] public Guid? DocumentId { get; set; }
     [Parameter] public Guid? JobId { get; set; }
     [Parameter] public string? FileName { get; set; }
+    [Parameter] public string? PersistentStatus { get; set; }
     [Parameter] public IReadOnlyList<PipelineUpdate> Updates { get; set; } = [];
     [Parameter] public string? Summary { get; set; }
     [Parameter] public string? Category { get; set; }

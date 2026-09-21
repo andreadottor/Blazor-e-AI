@@ -25,6 +25,8 @@ public enum DocumentStatus
 {
     Uploaded,
     Processing,
+    WaitingForApproval,
+    Approved,
     Completed,
     Rejected,
     Cancelled,

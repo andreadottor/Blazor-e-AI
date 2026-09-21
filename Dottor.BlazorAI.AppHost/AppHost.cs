@@ -24,7 +24,12 @@ var sql = builder.AddSqlServer("BlazorAi", sqlPassword)
     .WithDataVolume();
 var db = sql.AddDatabase("Demo");
 
-builder.AddProject<Projects.Dottor_BlazorAI_Web>("webfrontend")
+var mailpit = builder.AddContainer("mailpit", "axllent/mailpit", "latest")
+    .WithHttpEndpoint(targetPort: 8025, name: "http")
+    .WithEndpoint(targetPort: 1025, name: "smtp", scheme: "tcp")
+    .WithExternalHttpEndpoints();
+
+var web = builder.AddProject<Projects.Dottor_BlazorAI_Web>("webfrontend")
     .WithExternalHttpEndpoints()
     .WithHttpHealthCheck("/health")
     .WithReference(db)
@@ -32,6 +37,11 @@ builder.AddProject<Projects.Dottor_BlazorAI_Web>("webfrontend")
     .WithEnvironment("AI__OpenAI__Endpoint", aiEndpoint)
     .WithEnvironment("AI__OpenAI__ApiKey", aiApiKey)
     .WithEnvironment("AI__OpenAI__ImageModel", aiImageModel)
-    .WaitFor(db);
+    .WithEnvironment("Notifications__SmtpHost", mailpit.GetEndpoint("smtp").Property(EndpointProperty.Host))
+    .WithEnvironment("Notifications__SmtpPort", mailpit.GetEndpoint("smtp").Property(EndpointProperty.Port))
+    .WaitFor(db)
+    .WaitFor(mailpit);
+
+web.WithEnvironment("Notifications__PublicBaseUrl", web.GetEndpoint("https"));
 
 builder.Build().Run();

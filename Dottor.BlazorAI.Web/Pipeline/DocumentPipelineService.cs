@@ -5,28 +5,18 @@ using Microsoft.Agents.AI.Workflows;
 
 namespace Dottor.BlazorAI.Web.Pipeline;
 
-public sealed class DocumentPipelineService(
-    DocumentService documents,
-    DocumentTextExtractor textExtractor,
-    ChatService chat,
-    DocumentImageGenerator imageGenerator,
-    ILogger<DocumentPipelineService> logger)
+public sealed class DocumentPipelineService(DocumentService documents, DocumentTextExtractor textExtractor, ChatService chat, DocumentImageGenerator imageGenerator, ILogger<DocumentPipelineService> logger)
 {
     private readonly ConcurrentDictionary<Guid, PendingApproval> _pendingApprovals = new();
 
-    public async IAsyncEnumerable<PipelineUpdate> ProcessAsync(
-        Guid documentId,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+    public async IAsyncEnumerable<PipelineUpdate> ProcessAsync(Guid documentId, [EnumeratorCancellation] CancellationToken ct)
     {
+        await documents.MarkProcessingAsync(documentId, ct);
         yield return new("Upload", PipelineUpdateStatus.Completed, "PDF salvato nel database");
-        await documents.MarkProcessingAsync(documentId, cancellationToken);
 
         var workflow = BuildWorkflow();
-        await using var run = await InProcessExecution.RunStreamingAsync(
-            workflow,
-            new PipelineState(documentId),
-            cancellationToken: cancellationToken);
-        await using var events = run.WatchStreamAsync(cancellationToken).GetAsyncEnumerator(cancellationToken);
+        await using var run = await InProcessExecution.RunStreamingAsync(workflow, new PipelineState(documentId), cancellationToken: ct);
+        await using var events = run.WatchStreamAsync(ct).GetAsyncEnumerator(ct);
         var failureReported = false;
 
         try
@@ -111,13 +101,9 @@ public sealed class DocumentPipelineService(
         }
     }
 
-    public async Task RespondAsync(
-        Guid documentId,
-        bool approved,
-        string? prompt,
-        CancellationToken cancellationToken = default)
+    public async Task RespondAsync(Guid documentId, bool approved, string? prompt, CancellationToken ct = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
+        ct.ThrowIfCancellationRequested();
 
         if (!_pendingApprovals.TryGetValue(documentId, out var pending))
         {
@@ -147,16 +133,16 @@ public sealed class DocumentPipelineService(
         Func<PipelineState, CancellationToken, ValueTask<PipelineState>> reject = RejectAsync;
         Func<PipelineState, CancellationToken, ValueTask<PipelineState>> complete = CompleteAsync;
 
-        var extractExecutor = extract.BindAsExecutor("ExtractText");
-        var summaryExecutor = summarize.BindAsExecutor("Summary");
-        var categoryExecutor = categorize.BindAsExecutor("Category");
-        var promptExecutor = createPrompt.BindAsExecutor("ImagePrompt");
-        var approvalPort = RequestPort.Create<ImageApprovalRequest, ImageApprovalDecision>("ImageApproval");
-        var approvalExecutor = approvalPort.BindAsExecutor();
+        var extractExecutor     = extract.BindAsExecutor("ExtractText");
+        var summaryExecutor     = summarize.BindAsExecutor("Summary");
+        var categoryExecutor    = categorize.BindAsExecutor("Category");
+        var promptExecutor      = createPrompt.BindAsExecutor("ImagePrompt");
+        var approvalPort        = RequestPort.Create<ImageApprovalRequest, ImageApprovalDecision>("ImageApproval");
+        var approvalExecutor    = approvalPort.BindAsExecutor();
         var applyApprovalExecutor = applyApproval.BindAsExecutor("Approval");
-        var imageExecutor = generateImage.BindAsExecutor("Image");
-        var rejectExecutor = reject.BindAsExecutor("Rejected");
-        var completeExecutor = complete.BindAsExecutor("Complete");
+        var imageExecutor       = generateImage.BindAsExecutor("Image");
+        var rejectExecutor      = reject.BindAsExecutor("Rejected");
+        var completeExecutor    = complete.BindAsExecutor("Complete");
 
         return new WorkflowBuilder(extractExecutor)
             .AddEdge(extractExecutor, summaryExecutor)
@@ -172,23 +158,19 @@ public sealed class DocumentPipelineService(
             .Build();
     }
 
-    private async ValueTask<PipelineState> ExtractTextAsync(
-        PipelineState state,
-        CancellationToken cancellationToken)
+    private async ValueTask<PipelineState> ExtractTextAsync(PipelineState state, CancellationToken ct)
     {
         return await RunStepAsync("ExtractText", state.DocumentId, async () =>
         {
-            var document = await documents.GetAsync(state.DocumentId, cancellationToken)
+            var document = await documents.GetAsync(state.DocumentId, ct)
                 ?? throw new InvalidOperationException("Documento non trovato.");
             var text = textExtractor.Extract(document.PdfContent);
-            await documents.SaveExtractedTextAsync(state.DocumentId, text, cancellationToken);
+            await documents.SaveExtractedTextAsync(state.DocumentId, text, ct);
             return state with { ExtractedText = text };
         });
     }
 
-    private async ValueTask<PipelineState> SummarizeAsync(
-        PipelineState state,
-        CancellationToken cancellationToken)
+    private async ValueTask<PipelineState> SummarizeAsync(PipelineState state, CancellationToken ct)
     {
         return await RunStepAsync("Summary", state.DocumentId, async () =>
         {
@@ -196,15 +178,14 @@ public sealed class DocumentPipelineService(
                 Riassumi in italiano il documento seguente in massimo 120 parole.
 
                 {state.ExtractedText}
-                """, cancellationToken);
-            await documents.SaveSummaryAsync(state.DocumentId, summary, cancellationToken);
+                """, ct);
+
+            await documents.SaveSummaryAsync(state.DocumentId, summary, ct);
             return state with { Summary = summary };
         });
     }
 
-    private async ValueTask<PipelineState> CategorizeAsync(
-        PipelineState state,
-        CancellationToken cancellationToken)
+    private async ValueTask<PipelineState> CategorizeAsync(PipelineState state, CancellationToken ct)
     {
         return await RunStepAsync("Category", state.DocumentId, async () =>
         {
@@ -213,20 +194,19 @@ public sealed class DocumentPipelineService(
                 Rispondi soltanto con la categoria.
 
                 {state.Summary}
-                """, cancellationToken);
+                """, ct);
             category = category.Trim().Trim('"');
-            await documents.SaveCategoryAsync(state.DocumentId, category, cancellationToken);
+
+            await documents.SaveCategoryAsync(state.DocumentId, category, ct);
             return state with { Category = category };
         });
     }
 
-    private async ValueTask<ImageApprovalRequest> GenerateImagePromptAsync(
-        PipelineState state,
-        CancellationToken cancellationToken)
+    private async ValueTask<ImageApprovalRequest> GenerateImagePromptAsync(PipelineState state, CancellationToken ct)
     {
         return await RunStepAsync("ImagePrompt", state.DocumentId, async () =>
         {
-            var document = await documents.GetAsync(state.DocumentId, cancellationToken)
+            var document = await documents.GetAsync(state.DocumentId, ct)
                 ?? throw new InvalidOperationException("Documento non trovato.");
             var prompt = await chat.AskAsync($"""
                 Crea un prompt in inglese per un modello di generazione immagini.
@@ -236,31 +216,30 @@ public sealed class DocumentPipelineService(
                 Nome documento: {document.FileName}
                 Categoria: {state.Category}
                 Riassunto: {state.Summary}
-                """, cancellationToken);
+                """, ct);
             prompt = prompt.Trim().Trim('"');
-            await documents.SaveImagePromptAsync(state.DocumentId, prompt, cancellationToken);
+
+            await documents.SaveImagePromptAsync(state.DocumentId, prompt, ct);
             return new ImageApprovalRequest(state.DocumentId, prompt);
         });
     }
 
-    private async ValueTask<PipelineState> ApplyApprovalAsync(
-        ImageApprovalDecision decision,
-        CancellationToken cancellationToken)
+    private async ValueTask<PipelineState> ApplyApprovalAsync(ImageApprovalDecision decision, CancellationToken ct)
     {
         return await RunStepAsync("Approval", decision.DocumentId, async () =>
         {
-            var document = await documents.GetAsync(decision.DocumentId, cancellationToken)
+            var document = await documents.GetAsync(decision.DocumentId, ct)
                 ?? throw new InvalidOperationException("Documento non trovato.");
 
             if (!decision.Approved)
             {
-                await documents.RejectImagePromptAsync(decision.DocumentId, cancellationToken);
+                await documents.RejectImagePromptAsync(decision.DocumentId, ct);
                 return new PipelineState(
                     decision.DocumentId, document.ExtractedText, document.Summary, document.Category, false);
             }
 
-            await documents.ApproveImagePromptAsync(
-                decision.DocumentId, decision.Prompt!, cancellationToken);
+            await documents.ApproveImagePromptAsync(decision.DocumentId, decision.Prompt!, ct);
+
             return new PipelineState(
                 decision.DocumentId,
                 document.ExtractedText,
@@ -271,43 +250,33 @@ public sealed class DocumentPipelineService(
         });
     }
 
-    private async ValueTask<PipelineState> GenerateImageAsync(
-        PipelineState state,
-        CancellationToken cancellationToken)
+    private async ValueTask<PipelineState> GenerateImageAsync(PipelineState state, CancellationToken ct)
     {
         return await RunStepAsync("Image", state.DocumentId, async () =>
         {
-            var image = await imageGenerator.GenerateAsync(state.ApprovedImagePrompt!, cancellationToken);
-            await documents.SaveImageAsync(
-                state.DocumentId, image.Content, image.ContentType, cancellationToken);
+            var image = await imageGenerator.GenerateAsync(state.ApprovedImagePrompt!, ct);
+            await documents.SaveImageAsync(state.DocumentId, image.Content, image.ContentType, ct);
             return state;
         });
     }
 
-    private ValueTask<PipelineState> RejectAsync(
-        PipelineState state,
-        CancellationToken cancellationToken) =>
-        new(RunStepAsync("Rejected", state.DocumentId, () => Task.FromResult(state)));
+    private ValueTask<PipelineState> RejectAsync(PipelineState state, CancellationToken ct) 
+        => new(RunStepAsync("Rejected", state.DocumentId, () => Task.FromResult(state)));
 
-    private async ValueTask<PipelineState> CompleteAsync(
-        PipelineState state,
-        CancellationToken cancellationToken)
+    private async ValueTask<PipelineState> CompleteAsync(PipelineState state, CancellationToken ct)
     {
         return await RunStepAsync("Complete", state.DocumentId, async () =>
         {
             if (state.IsApproved)
             {
-                await documents.MarkCompletedAsync(state.DocumentId, cancellationToken);
+                await documents.MarkCompletedAsync(state.DocumentId, ct);
             }
 
             return state;
         });
     }
 
-    private async Task<T> RunStepAsync<T>(
-        string step,
-        Guid documentId,
-        Func<Task<T>> action)
+    private async Task<T> RunStepAsync<T>(string step, Guid documentId, Func<Task<T>> action)
     {
         logger.LogInformation("Starting {Step} for document {DocumentId}", step, documentId);
         try
@@ -332,13 +301,11 @@ public sealed class DocumentPipelineService(
 
     private static PipelineUpdate? Map(WorkflowEvent workflowEvent) => workflowEvent switch
     {
-        ExecutorInvokedEvent started when started.ExecutorId != "ImageApproval" => new(
-            started.ExecutorId, PipelineUpdateStatus.Started, $"{DisplayName(started.ExecutorId)}..."),
+        ExecutorInvokedEvent started when started.ExecutorId != "ImageApproval" 
+                                         => new(started.ExecutorId, PipelineUpdateStatus.Started, $"{DisplayName(started.ExecutorId)}..."),
         ExecutorCompletedEvent completed => Completed(completed.ExecutorId, completed.Data),
-        ExecutorFailedEvent failed => new(
-            failed.ExecutorId, PipelineUpdateStatus.Failed, ErrorMessage(failed.Data)),
-        WorkflowErrorEvent error => new(
-            "Pipeline", PipelineUpdateStatus.Failed, ErrorMessage(error.Exception)),
+        ExecutorFailedEvent failed       => new(failed.ExecutorId, PipelineUpdateStatus.Failed, ErrorMessage(failed.Data)),
+        WorkflowErrorEvent error         => new("Pipeline", PipelineUpdateStatus.Failed, ErrorMessage(error.Exception)),
         _ => null
     };
 
@@ -367,23 +334,24 @@ public sealed class DocumentPipelineService(
 
     private static string DisplayName(string step) => step switch
     {
-        "ExtractText" => "Testo estratto",
-        "Summary" => "Riassunto completato",
-        "Category" => "Categorizzazione completata",
-        "ImagePrompt" => "Prompt immagine generato",
-        "Approval" => "Approvazione ricevuta",
-        "Image" => "Immagine generata",
-        "Rejected" => "Generazione immagine rifiutata",
-        "Complete" => "Elaborazione completata",
+        "ExtractText"   => "Testo estratto",
+        "Summary"       => "Riassunto completato",
+        "Category"      => "Categorizzazione completata",
+        "ImagePrompt"   => "Prompt immagine generato",
+        "Approval"      => "Approvazione ricevuta",
+        "Image"         => "Immagine generata",
+        "Rejected"      => "Generazione immagine rifiutata",
+        "Complete"      => "Elaborazione completata",
         _ => step
     };
 
-    private static string ErrorMessage(object? error) => error switch
-    {
-        Exception exception => exception.GetBaseException().Message,
-        null => "Pipeline non riuscita",
-        _ => error.ToString() ?? "Pipeline non riuscita"
-    };
+    private static string ErrorMessage(object? error) 
+        => error switch
+            {
+                Exception exception => exception.GetBaseException().Message,
+                null                => "Pipeline non riuscita",
+                _                   => error.ToString() ?? "Pipeline non riuscita"
+            };
 
     private sealed record PipelineState(
         Guid DocumentId,

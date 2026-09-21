@@ -36,6 +36,7 @@ builder.Services.AddSingleton<ChatService>();
 builder.Services.AddSingleton<DocumentService>();
 builder.Services.AddSingleton<DocumentTextExtractor>();
 builder.Services.AddSingleton<DocumentImageGenerator>();
+builder.Services.AddSingleton<DocumentNotificationService>();
 builder.Services.AddSingleton<DocumentPipelineService>();
 builder.Services.AddSingleton<DocumentProcessingQueue>();
 builder.Services.AddSingleton<DocumentUpdateHub>();
@@ -85,16 +86,16 @@ await using (var scope = app.Services.CreateAsyncScope())
     var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
     await using var db = await dbFactory.CreateDbContextAsync();
     await db.Database.EnsureCreatedAsync();
-    await db.Database.ExecuteSqlRawAsync("""
-        IF COL_LENGTH('Documents', 'GeneratedImagePrompt') IS NULL
-            ALTER TABLE [Documents] ADD [GeneratedImagePrompt] nvarchar(max) NULL;
-        IF COL_LENGTH('Documents', 'ApprovedImagePrompt') IS NULL
-            ALTER TABLE [Documents] ADD [ApprovedImagePrompt] nvarchar(max) NULL;
-        IF COL_LENGTH('Documents', 'ApprovalStatus') IS NULL
-            ALTER TABLE [Documents] ADD [ApprovalStatus] nvarchar(20) NULL;
-        IF COL_LENGTH('Documents', 'ApprovedAt') IS NULL
-            ALTER TABLE [Documents] ADD [ApprovedAt] datetimeoffset NULL;
-        """);
+    //await db.Database.ExecuteSqlRawAsync("""
+    //    IF COL_LENGTH('Documents', 'GeneratedImagePrompt') IS NULL
+    //        ALTER TABLE [Documents] ADD [GeneratedImagePrompt] nvarchar(max) NULL;
+    //    IF COL_LENGTH('Documents', 'ApprovedImagePrompt') IS NULL
+    //        ALTER TABLE [Documents] ADD [ApprovedImagePrompt] nvarchar(max) NULL;
+    //    IF COL_LENGTH('Documents', 'ApprovalStatus') IS NULL
+    //        ALTER TABLE [Documents] ADD [ApprovalStatus] nvarchar(20) NULL;
+    //    IF COL_LENGTH('Documents', 'ApprovedAt') IS NULL
+    //        ALTER TABLE [Documents] ADD [ApprovedAt] datetimeoffset NULL;
+    //    """);
 }
 
 app.Run();

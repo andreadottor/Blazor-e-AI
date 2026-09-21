@@ -23,17 +23,13 @@ public sealed class DocumentService(IDbContextFactory<AppDbContext> dbFactory)
     /// <param name="fileName">Original file name of the upload.</param>
     /// <param name="contentType">Content type reported by the browser.</param>
     /// <param name="content">Stream with the PDF bytes.</param>
-    /// <param name="cancellationToken">Token used to cancel the operation.</param>
+    /// <param name="ct">Token used to cancel the operation.</param>
     /// <returns>The identifier of the newly created document.</returns>
     /// <exception cref="InvalidDataException">Thrown when the file is empty, too large or not a valid PDF.</exception>
-    public async Task<Guid> SaveUploadAsync(
-        string fileName,
-        string contentType,
-        Stream content,
-        CancellationToken cancellationToken = default)
+    public async Task<Guid> SaveUploadAsync(string fileName, string contentType, Stream content, CancellationToken ct = default)
     {
         await using var buffer = new MemoryStream();
-        await content.CopyToAsync(buffer, cancellationToken);
+        await content.CopyToAsync(buffer, ct);
         var bytes = buffer.ToArray();
 
         if (bytes.Length == 0 || bytes.Length > MaxPdfSize)
@@ -49,115 +45,117 @@ public sealed class DocumentService(IDbContextFactory<AppDbContext> dbFactory)
         var now = DateTimeOffset.UtcNow;
         var document = new Document
         {
-            Id = Guid.NewGuid(),
-            FileName = Path.GetFileName(fileName),
+            Id          = Guid.NewGuid(),
+            FileName    = Path.GetFileName(fileName),
             ContentType = "application/pdf",
-            PdfContent = bytes,
-            Status = DocumentStatus.Uploaded,
-            CreatedAt = now,
-            UpdatedAt = now
+            PdfContent  = bytes,
+            Status      = DocumentStatus.Uploaded,
+            CreatedAt   = now,
+            UpdatedAt   = now
         };
 
-        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
         db.Documents.Add(document);
-        await db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(ct);
         return document.Id;
     }
 
     /// <summary>
     /// Loads a document by its identifier (read-only). Used by the pipeline and by the UI to display results.
     /// </summary>
-    public async Task<Document?> GetAsync(Guid id, CancellationToken cancellationToken = default)
+    public async Task<Document?> GetAsync(Guid id, CancellationToken ct = default)
     {
-        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
-        return await db.Documents.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        return await db.Documents.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
     }
 
     /// <summary>Marks the document as <see cref="DocumentStatus.Processing"/> and clears any previous error.</summary>
-    public Task MarkProcessingAsync(Guid id, CancellationToken cancellationToken) =>
+    public Task MarkProcessingAsync(Guid id, CancellationToken ct) =>
         UpdateAsync(id, document =>
         {
             document.Status = DocumentStatus.Processing;
             document.ErrorMessage = null;
-        }, cancellationToken);
+        }, ct);
 
     /// <summary>Persists the text extracted from the PDF (result of the "ExtractText" pipeline step).</summary>
-    public Task SaveExtractedTextAsync(Guid id, string text, CancellationToken cancellationToken) =>
-        UpdateAsync(id, document => document.ExtractedText = text, cancellationToken);
+    public Task SaveExtractedTextAsync(Guid id, string text, CancellationToken ct) =>
+        UpdateAsync(id, document => document.ExtractedText = text, ct);
 
     /// <summary>Persists the AI-generated summary (result of the "Summary" pipeline step).</summary>
-    public Task SaveSummaryAsync(Guid id, string summary, CancellationToken cancellationToken) =>
-        UpdateAsync(id, document => document.Summary = summary, cancellationToken);
+    public Task SaveSummaryAsync(Guid id, string summary, CancellationToken ct) =>
+        UpdateAsync(id, document => document.Summary = summary, ct);
 
     /// <summary>Persists the AI-generated category (result of the "Category" pipeline step).</summary>
-    public Task SaveCategoryAsync(Guid id, string category, CancellationToken cancellationToken) =>
-        UpdateAsync(id, document => document.Category = category, cancellationToken);
+    public Task SaveCategoryAsync(Guid id, string category, CancellationToken ct) =>
+        UpdateAsync(id, document => document.Category = category, ct);
 
     /// <summary>Persists the AI proposal before the workflow asks for human approval.</summary>
-    public Task SaveImagePromptAsync(Guid id, string prompt, CancellationToken cancellationToken) =>
+    public Task SaveImagePromptAsync(Guid id, string prompt, CancellationToken ct) =>
         UpdateAsync(id, document =>
         {
             document.GeneratedImagePrompt = prompt;
-            document.ApprovedImagePrompt = null;
-            document.ApprovalStatus = ApprovalStatus.Pending;
-            document.ApprovedAt = null;
-        }, cancellationToken);
+            document.ApprovedImagePrompt  = null;
+            document.ApprovalStatus       = ApprovalStatus.Pending;
+            document.Status               = DocumentStatus.WaitingForApproval;
+            document.ApprovedAt           = null;
+        }, ct);
 
     /// <summary>Persists the exact prompt approved by the user.</summary>
-    public Task ApproveImagePromptAsync(Guid id, string prompt, CancellationToken cancellationToken) =>
+    public Task ApproveImagePromptAsync(Guid id, string prompt, CancellationToken ct) =>
         UpdateAsync(id, document =>
         {
             document.ApprovedImagePrompt = prompt;
-            document.ApprovalStatus = ApprovalStatus.Approved;
-            document.ApprovedAt = DateTimeOffset.UtcNow;
-        }, cancellationToken);
+            document.ApprovalStatus      = ApprovalStatus.Approved;
+            document.Status               = DocumentStatus.Approved;
+            document.ApprovedAt           = DateTimeOffset.UtcNow;
+        }, ct);
 
     /// <summary>Records a controlled rejection; no image will be generated.</summary>
-    public Task RejectImagePromptAsync(Guid id, CancellationToken cancellationToken) =>
+    public Task RejectImagePromptAsync(Guid id, CancellationToken ct) =>
         UpdateAsync(id, document =>
         {
             document.ApprovedImagePrompt = null;
-            document.ApprovalStatus = ApprovalStatus.Rejected;
-            document.Status = DocumentStatus.Rejected;
-        }, cancellationToken);
+            document.ApprovalStatus      = ApprovalStatus.Rejected;
+            document.Status              = DocumentStatus.Rejected;
+        }, ct);
 
     /// <summary>Persists the AI-generated image (result of the "Image" pipeline step).</summary>
-    public Task SaveImageAsync(Guid id, byte[] image, string contentType, CancellationToken cancellationToken) =>
+    public Task SaveImageAsync(Guid id, byte[] image, string contentType, CancellationToken ct) =>
         UpdateAsync(id, document =>
         {
-            document.GeneratedImage = image;
+            document.GeneratedImage            = image;
             document.GeneratedImageContentType = contentType;
-        }, cancellationToken);
+        }, ct);
 
     /// <summary>Marks the document as <see cref="DocumentStatus.Completed"/> (final "Complete" pipeline step).</summary>
-    public Task MarkCompletedAsync(Guid id, CancellationToken cancellationToken) =>
-        UpdateAsync(id, document => document.Status = DocumentStatus.Completed, cancellationToken);
+    public Task MarkCompletedAsync(Guid id, CancellationToken ct) =>
+        UpdateAsync(id, document => document.Status = DocumentStatus.Completed, ct);
 
     /// <summary>Marks processing as cancelled without classifying it as a technical failure.</summary>
-    public Task MarkCancelledAsync(Guid id, CancellationToken cancellationToken = default) =>
+    public Task MarkCancelledAsync(Guid id, CancellationToken ct = default) =>
         UpdateAsync(id, document =>
         {
-            document.Status = DocumentStatus.Cancelled;
+            document.Status       = DocumentStatus.Cancelled;
             document.ErrorMessage = null;
-        }, cancellationToken);
+        }, ct);
 
     /// <summary>Marks the document as <see cref="DocumentStatus.Failed"/> and stores the error message.</summary>
-    public Task MarkFailedAsync(Guid id, string error, CancellationToken cancellationToken = default) =>
+    public Task MarkFailedAsync(Guid id, string error, CancellationToken ct = default) =>
         UpdateAsync(id, document =>
         {
-            document.Status = DocumentStatus.Failed;
+            document.Status       = DocumentStatus.Failed;
             document.ErrorMessage = error;
-        }, cancellationToken);
+        }, ct);
 
     /// <summary>
     /// Loads the document, applies the <paramref name="update"/> mutation, refreshes the timestamp and saves it.
     /// </summary>
-    private async Task UpdateAsync(Guid id, Action<Document> update, CancellationToken cancellationToken)
+    private async Task UpdateAsync(Guid id, Action<Document> update, CancellationToken ct)
     {
-        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
-        var document = await db.Documents.SingleAsync(x => x.Id == id, cancellationToken);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var document = await db.Documents.SingleAsync(x => x.Id == id, ct);
         update(document);
         document.UpdatedAt = DateTimeOffset.UtcNow;
-        await db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(ct);
     }
 }
