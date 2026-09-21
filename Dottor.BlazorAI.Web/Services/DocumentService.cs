@@ -69,6 +69,27 @@ public sealed class DocumentService(IDbContextFactory<AppDbContext> dbFactory)
         return await db.Documents.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
     }
 
+    /// <summary>
+    /// Loads the lightweight document list used by the overview page without reading PDF or image blobs.
+    /// </summary>
+    public async Task<List<DocumentListItem>> GetDocumentsAsync(CancellationToken ct = default)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        return await db.Documents
+            .AsNoTracking()
+            .OrderByDescending(x => x.CreatedAt)
+            .Select(x => new DocumentListItem(
+                x.Id,
+                x.FileName,
+                x.Status,
+                x.ApprovalStatus,
+                x.Category,
+                x.GeneratedImage != null,
+                x.CreatedAt,
+                x.UpdatedAt))
+            .ToListAsync(ct);
+    }
+
     /// <summary>Marks the document as <see cref="DocumentStatus.Processing"/> and clears any previous error.</summary>
     public Task MarkProcessingAsync(Guid id, CancellationToken ct) =>
         UpdateAsync(id, document =>
@@ -159,3 +180,13 @@ public sealed class DocumentService(IDbContextFactory<AppDbContext> dbFactory)
         await db.SaveChangesAsync(ct);
     }
 }
+
+public sealed record DocumentListItem(
+    Guid Id,
+    string FileName,
+    DocumentStatus Status,
+    ApprovalStatus? ApprovalStatus,
+    string? Category,
+    bool ImageAvailable,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);

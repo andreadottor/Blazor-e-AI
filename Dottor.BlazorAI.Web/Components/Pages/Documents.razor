@@ -1,0 +1,126 @@
+@page "/documents"
+@using Dottor.BlazorAI.Web.Data
+@using Dottor.BlazorAI.Web.Services
+@inject DocumentService DocumentService
+
+<PageTitle>Documents</PageTitle>
+
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+    <div>
+        <h1>Documents</h1>
+        <p class="lead mb-2">Uploaded documents and current processing status.</p>
+
+        @if (!isLoading && error is null)
+        {
+            <div class="d-flex flex-wrap gap-2 small" aria-label="Document summary">
+                <span class="badge text-bg-light border text-dark">Total: @documents.Count</span>
+                <span class="badge text-bg-primary">Processing: @ProcessingCount</span>
+                <span class="badge text-bg-warning">Waiting for approval: @WaitingForApprovalCount</span>
+            </div>
+        }
+    </div>
+
+    <button class="btn btn-outline-primary" type="button" @onclick="LoadAsync" disabled="@isLoading">
+        @if (isLoading)
+        {
+            <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+        }
+        Refresh
+    </button>
+</div>
+
+@if (isLoading && documents.Count == 0)
+{
+    <div class="d-flex align-items-center gap-2 text-body-secondary" role="status">
+        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+        Loading documents...
+    </div>
+}
+else if (error is not null)
+{
+    <div class="alert alert-danger" role="alert">
+        <div>@error</div>
+        <button class="btn btn-sm btn-outline-danger mt-2" type="button" @onclick="LoadAsync">Try again</button>
+    </div>
+}
+else if (documents.Count == 0)
+{
+    <div class="alert alert-secondary">
+        No documents uploaded yet. <a href="demo4" class="alert-link">Upload a PDF in Demo 4</a>.
+    </div>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead>
+                <tr>
+                    <th scope="col"></th>
+                    <th scope="col">File name</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Approval</th>
+                    <th scope="col">Category</th>
+                    <th scope="col">Created</th>
+                    <th scope="col">Updated</th>
+                    <th scope="col" class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var document in documents)
+                {
+                    <tr class="@(document.Status == DocumentStatus.WaitingForApproval ? "table-warning" : null)">
+                        <td>
+                            @if (document.ImageAvailable)
+                            {
+                                <a href="@($"/documents/{document.Id}/image")"
+                                   target="_blank"
+                                   rel="noopener"
+                                   aria-label="@($"Open generated image for {document.FileName}")">
+                                    <img class="img-thumbnail document-thumbnail"
+                                         src="@($"/documents/{document.Id}/image")"
+                                         alt="@($"Generated image for {document.FileName}")" />
+                                </a>
+                            }
+                            else
+                            {
+                                <span class="text-body-secondary">—</span>
+                            }
+                        </td>
+                        <td class="fw-semibold text-break">@document.FileName</td>
+                        <td>
+                            <span class="badge @StatusBadge(document.Status)">@StatusLabel(document.Status)</span>
+                        </td>
+                        <td>
+                            @if (document.ApprovalStatus is not null)
+                            {
+                                <span class="badge @ApprovalBadge(document.ApprovalStatus.Value)">
+                                    @ApprovalLabel(document.ApprovalStatus.Value)
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="text-body-secondary">—</span>
+                            }
+                        </td>
+                        <td>@(string.IsNullOrWhiteSpace(document.Category) ? "—" : document.Category)</td>
+                       
+                        <td class="text-nowrap">@FormatDate(document.CreatedAt)</td>
+                        <td class="text-nowrap">@FormatDate(document.UpdatedAt)</td>
+                        <td>
+                            <div class="d-flex justify-content-end gap-2">
+                                <a class="btn btn-sm @(document.Status == DocumentStatus.WaitingForApproval ? "btn-warning" : "btn-outline-primary")"
+                                   href="@($"/documents/{document.Id}")">
+                                    @(document.Status == DocumentStatus.WaitingForApproval ? "Review" : "Open")
+                                </a>
+                                <a class="btn btn-sm btn-outline-secondary"
+                                   href="@($"/documents/{document.Id}/pdf")"
+                                   target="_blank"
+                                   rel="noopener">PDF</a>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
