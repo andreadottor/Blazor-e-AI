@@ -11,12 +11,42 @@ namespace Dottor.BlazorAI.Web.Background;
 /// </summary>
 public sealed class DocumentProcessingWorker(DocumentProcessingQueue queue, DocumentUpdateHub updates, IServiceScopeFactory scopeFactory, ILogger<DocumentProcessingWorker> logger) : BackgroundService
 {
+    // Limits the number of workflows running concurrently to 5.
+    private readonly SemaphoreSlim _throttle = new(initialCount: 5, maxCount: 5);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         await foreach (var request in queue.ReadAllAsync(stoppingToken))
         {
             await ProcessAsync(request, stoppingToken);
         }
+
+        //await foreach (var request in queue.ReadAllAsync(stoppingToken))
+        //{
+        //    // Wait for a free slot: if 5 workflows are already running, the loop
+        //    // suspends here until one of them completes and releases the semaphore.
+        //    await _throttle.WaitAsync(stoppingToken);
+
+        //    // Parallel execution with limited concurrency: start the workflow without awaiting
+        //    // its completion, so the loop can proceed to read the next request.
+        //    _ = Task.Run(async () =>
+        //    {
+        //        try
+        //        {
+        //            await ProcessAsync(request, stoppingToken);
+        //        }
+        //        finally
+        //        {
+        //            _throttle.Release();
+        //        }
+        //    }, stoppingToken);
+        //}
+    }
+
+    public override void Dispose()
+    {
+        _throttle.Dispose();
+        base.Dispose();
     }
 
     private async Task ProcessAsync(DocumentProcessingRequest request, CancellationToken stoppingToken)
