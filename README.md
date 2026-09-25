@@ -16,7 +16,7 @@ dotnet user-secrets set "AI:OpenAI:Endpoint" "<foundry-openai-v1-endpoint>" --pr
 dotnet user-secrets set "AI:OpenAI:ApiKey" "<api-key>" --project Dottor.BlazorAI.AppHost
 ```
 
-`gpt-5.4` viene usato per chat, streaming, summary e classificazione. La generazione
+`gpt-5.6-sol` viene usato per chat, streaming, summary e classificazione. La generazione
 immagini usa la MAI Images API di Foundry e un deployment separato, ad esempio `MAI-Image-2.6`:
 
 ```powershell
