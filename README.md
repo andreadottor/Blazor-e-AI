@@ -1,9 +1,9 @@
 # Blazor e AI: UI reattive tra streaming e agenti
 
-Demo 1. `Task<T>` e risposta completa;
-Demo 2. streaming con `IAsyncEnumerable<T>`;
-Demo 3. pipeline Microsoft Agent Framework con aggiornamenti progressivi;
-Demo 4. background processing in-memory con `Channel<T>`.
+- Demo 1. `Task<T>` e risposta completa;
+- Demo 2. streaming con `IAsyncEnumerable<T>`;
+- Demo 3. pipeline Microsoft Agent Framework con aggiornamenti progressivi;
+- Demo 4. background processing in-memory con `Channel<T>`.
 
 ## Configurazione
 
