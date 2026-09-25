@@ -25,8 +25,8 @@ builder.Services.AddPooledDbContextFactory<AppDbContext>(options =>
 
 var configuredApiKey = builder.Configuration["AI:OpenAI:ApiKey"];
 var apiKey = string.IsNullOrWhiteSpace(configuredApiKey) ? "not-configured" : configuredApiKey;
-var model = builder.Configuration["AI:OpenAI:Model"] ?? "gpt-5.5";
-var endpoint = builder.Configuration["AI:OpenAI:Endpoint"] ?? "https://example.invalid/openai/v1";
+var model = builder.Configuration["AI:OpenAI:Model"] ?? "gpt-5.6-sol";
+var endpoint = builder.Configuration["AI:OpenAI:Endpoint"] ?? "https://sample.services.ai.azure.com/openai/v1";
 var openAI = new OpenAIClient(
     new ApiKeyCredential(apiKey),
     new OpenAIClientOptions { Endpoint = new Uri(endpoint) });
