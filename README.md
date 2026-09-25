@@ -1,5 +1,7 @@
 # Blazor e AI: UI reattive tra streaming e agenti
 
+**Slide** per 1nn0vAI del 26.09.2026: [downlaod](1nn0vAI__Blazor_e_AI.pdf)
+
 - Demo 1. `Task<T>` e risposta completa;
 - Demo 2. streaming con `IAsyncEnumerable<T>`;
 - Demo 3. pipeline Microsoft Agent Framework con aggiornamenti progressivi;
