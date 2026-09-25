@@ -45,6 +45,7 @@ public sealed class DocumentPipelineService(
                     moveError = ex;
                 }
 
+                // 1. Cancellazione
                 if (moveError is OperationCanceledException)
                 {
                     await documents.MarkCancelledAsync(documentId, CancellationToken.None);
@@ -53,6 +54,7 @@ public sealed class DocumentPipelineService(
                     yield break;
                 }
 
+                // 2. Errore
                 if (moveError is not null)
                 {
                     var message = ErrorMessage(moveError);
@@ -70,6 +72,7 @@ public sealed class DocumentPipelineService(
                     yield break;
                 }
 
+                // 3. Richiesta di approvazione (human-in-the-loop)
                 if (workflowEvent is RequestInfoEvent requestEvent &&
                     requestEvent.Request.TryGetDataAs<ImageApprovalRequest>(out var request))
                 {
@@ -87,6 +90,7 @@ public sealed class DocumentPipelineService(
                     continue;
                 }
 
+                // 4. Evento normale → update
                 var update = Map(workflowEvent!);
                 if (update is not null)
                 {
